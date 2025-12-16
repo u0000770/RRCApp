@@ -1,0 +1,134 @@
+﻿@rendermode InteractiveServer
+@page "/raceevents/create"
+
+@using RRCServices
+@inject IRaceEventService Service
+@inject NavigationManager Nav
+
+<h3>Create Race Event</h3>
+
+@if (_loading)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-body">
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-danger">@_error</div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_success))
+            {
+                <div class="alert alert-success">@_success</div>
+            }
+
+            @if (_duplicateWarning)
+            {
+                <div class="alert alert-warning">
+                    A RaceEvent already exists for this Event and Date. Pick a different date (or event).
+                </div>
+            }
+
+            <EditForm Model="_model" OnValidSubmit="CreateAsync">
+                <DataAnnotationsValidator />
+
+                <div class="row g-3">
+
+                    @* -------------------------
+                       Distance filter dropdown
+                       Manual binding so we can run async onchange safely
+                       ------------------------- *@
+                    <div class="col-12 col-md-4">
+                        <label class="form-label">Distance</label>
+
+                        <select class="form-select"
+                                value="@_selectedDistanceCode"
+                                @onchange="OnDistanceChangedAsync">
+                            <option value="">-- select distance --</option>
+
+                            @foreach (var d in _lookups.Distances)
+                            {
+                                <option value="@d.Code">@d.Name (@d.Code)</option>
+                            }
+                        </select>
+
+                        <div class="form-text">
+                            Choose a distance to filter the Event list.
+                        </div>
+                    </div>
+
+                    @* -------------------------
+                       Event dropdown (filtered)
+                       ------------------------- *@
+                    <div class="col-12 col-md-8">
+                        <label class="form-label">Event</label>
+
+                        <select class="form-select"
+                                @bind="_model.EventId"
+                                disabled="@(!_eventsEnabled)">
+                            <option value="0">-- select event --</option>
+
+                            @foreach (var e in _lookups.Events)
+                            {
+                                <option value="@e.Id">
+                                    @e.Title (@e.Venue)
+                                </option>
+                            }
+                        </select>
+
+                        <div class="form-text">
+                            Events are filtered by selected distance and active-only.
+                        </div>
+                    </div>
+
+                    @* -------------------------
+                       Date picker
+                       ------------------------- *@
+                    <div class="col-12 col-md-4">
+                        <label class="form-label">Race date</label>
+
+                        @* Uses DateTime because your DTO uses DateTime *@
+                        <InputDate class="form-control" @bind-Value="_model.Date" />
+
+                        <div class="form-text">
+                            Time is ignored; only the calendar date is used.
+                        </div>
+                    </div>
+
+                    @* -------------------------
+                       Active checkbox
+                       ------------------------- *@
+                    <div class="col-12 col-md-4 d-flex align-items-end">
+                        <div class="form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="_model.Active" />
+                            <label class="form-check-label">Active</label>
+                        </div>
+                    </div>
+
+                    @* -------------------------
+                       Buttons
+                       ------------------------- *@
+                    <div class="col-12 col-md-4 d-flex align-items-end gap-2">
+                        <button class="btn btn-primary" type="submit" disabled="@_saving">
+                            @(_saving ? "Creating..." : "Create")
+                        </button>
+
+                        <button class="btn btn-secondary" type="button" @onclick="GoBack">
+                            Back
+                        </button>
+                    </div>
+
+                </div>
+            </EditForm>
+
+        </div>
+    </div>
+}
+
+
+
+
