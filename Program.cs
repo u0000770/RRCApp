@@ -19,7 +19,9 @@ namespace RRCApp
             builder.Services.AddScoped<DisciplineService>();
             builder.Services.AddScoped<EventService>();
             builder.Services.AddScoped<IRaceEventService, RaceEventService>();
-
+            builder.Services.AddScoped<ITrophyCalculator, TrophyCalculator>();
+            builder.Services.AddScoped<ITimeFormatter, TimeFormatter>();
+            builder.Services.AddScoped<IRaceResultService,RaceResultService>();
 
             // Add services to the container.
             builder.Services.AddRazorComponents()

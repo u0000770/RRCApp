@@ -5,6 +5,10 @@ VisualStudioVersion = 17.14.36623.8
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RRCApp", "RRCApp.csproj", "{3154D5D1-7A69-4937-8C3B-A64B0148A625}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RRCDataModel", "..\RRCDataModel\RRCDataModel.csproj", "{DFC58775-F328-C6A0-7008-127799B22C44}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RRCServices", "..\RRCServices\RRCServices.csproj", "{EC0CD55B-EBA5-10CF-46C2-937CE8B1E1F4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +19,14 @@ Global
 		{3154D5D1-7A69-4937-8C3B-A64B0148A625}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3154D5D1-7A69-4937-8C3B-A64B0148A625}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3154D5D1-7A69-4937-8C3B-A64B0148A625}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DFC58775-F328-C6A0-7008-127799B22C44}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DFC58775-F328-C6A0-7008-127799B22C44}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DFC58775-F328-C6A0-7008-127799B22C44}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DFC58775-F328-C6A0-7008-127799B22C44}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EC0CD55B-EBA5-10CF-46C2-937CE8B1E1F4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EC0CD55B-EBA5-10CF-46C2-937CE8B1E1F4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EC0CD55B-EBA5-10CF-46C2-937CE8B1E1F4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EC0CD55B-EBA5-10CF-46C2-937CE8B1E1F4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

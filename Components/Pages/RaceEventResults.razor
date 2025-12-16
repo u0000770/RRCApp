@@ -1,0 +1,69 @@
+﻿@rendermode InteractiveServer
+@page "/raceeventresults/{RaceEventId:int}"
+
+@using RRCServices
+@inject IRaceResultService ResultsService
+
+<h3>Race Results</h3>
+
+@if (_loading)
+{
+    <p>Loading…</p>
+}
+else if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_page is null)
+{
+    <div class="alert alert-warning">Race event not found.</div>
+}
+else
+{
+    <div class="mb-3">
+        <div><strong>Event:</strong> @_page.EventTitle</div>
+        <div><strong>Date:</strong> @_page.Date</div>
+        <div><strong>Distance:</strong> @_page.DistanceCode</div>
+    </div>
+
+    @if (_page.Results.Count == 0)
+    {
+        <p class="text-muted">No results available for this race event.</p>
+    }
+    else
+    {
+        <table class="table table-sm table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th style="width:170px;">Predicted Time</th>
+                    <th style="width:170px;">Actual Time</th>
+                    <th style="width:150px;">Time Difference</th>
+                    <th style="width:120px;">Trophy Time</th>
+                    <th style="width:120px;">Trophy Points</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _page.Results)
+                {
+                    <tr>
+                        <td>@r.RunnerName</td>
+                        <td>@r.PredictedTime</td>
+                        <td>@r.ActualTime</td>
+
+                        @* DifferenceSeconds is an int (target - actual) *@
+                        <td>@r.TimeDifferenceSeconds</td>
+
+                        @* TrophyTimeSeconds is nullable *@
+                        <td>@(r.TrophyTimeSeconds?.ToString() ?? "")</td>
+
+                        <td>@r.TrophyPoints</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+
+
