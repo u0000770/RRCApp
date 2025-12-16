@@ -1,0 +1,214 @@
+﻿@rendermode InteractiveServer
+@page "/raceevents"
+
+@using RRCServices
+@inject IRaceEventService Service
+@inject NavigationManager Nav
+
+<h3>Race Events</h3>
+
+@if (_list is null)
+{
+    <p>Loading list…</p>
+}
+else
+{
+    <div class="row g-3">
+
+        <!-- LIST -->
+        <div class="col-12 col-lg-6">
+            <div class="card">
+                <div class="card-header">
+                    <strong>Race Events</strong>
+                    <span class="ms-2 text-muted">(click headers to sort)</span>
+                </div>
+
+                <div class="card-body">
+                    <div class="form-check mb-3">
+                        <input class="form-check-input"
+                               type="checkbox"
+                               id="activeOnly"
+                               @bind="_activeOnly"
+                               @bind:after="ReloadListAsync" />
+                        <label class="form-check-label" for="activeOnly">
+                            Show active only
+                        </label>
+                    </div>
+
+                    @if (_list.Count == 0)
+                    {
+                        <p class="text-muted mb-0">No race events found.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th style="cursor:pointer"
+                                        @onclick='() => SortBy("Title")'>
+                                        Event @SortIndicator("Title")
+                                    </th>
+
+                                    <th style="cursor:pointer; width:140px;"
+                                        @onclick='() => SortBy("Date")'>
+                                        Date @SortIndicator("Date")
+                                    </th>
+
+                                    <th style="width: 120px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in _list)
+                                {
+                                    <tr class="@(item.RaceEventId == _selectedId ? "table-active" : "")">
+                                        <td>@item.EventTitle</td>
+                                        <td>@item.Date</td>
+                                        <td class="text-end">
+                                            <button class="btn btn-outline-primary btn-sm"
+                                                    type="button"
+                                                    @onclick="() => ShowDetailsAsync(item.RaceEventId)">
+                                                Details
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_listError))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@_listError</div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- DETAILS -->
+        <div class="col-12 col-lg-6">
+            <div class="card">
+                <div class="card-header">
+                    <strong>Details</strong>
+                </div>
+
+                <div class="card-body">
+                    @if (_selectedId is null)
+                    {
+                        <p class="text-muted mb-0">Select a race event from the list.</p>
+                    }
+                    else if (_detailsLoading)
+                    {
+                        <p>Loading details…</p>
+                    }
+                    else if (_details is null)
+                    {
+                        <div class="alert alert-warning mb-0">
+                            Details not found (it may have been removed or filtered out).
+                        </div>
+                    }
+                    else
+                    {
+                        @* ----------------------------
+                           NORMAL DETAILS VIEW
+                           ---------------------------- *@
+                        @if (!_isEditingDetails)
+                        {
+                            <dl class="row mb-0">
+                                <dt class="col-sm-4">RaceEvent Id</dt>
+                                <dd class="col-sm-8">@_details.RaceEventId</dd>
+
+                                <dt class="col-sm-4">Date</dt>
+                                <dd class="col-sm-8">@_details.Date</dd>
+
+                                <dt class="col-sm-4">Active</dt>
+                                <dd class="col-sm-8">@(_details.Active ? "Yes" : "No")</dd>
+
+                                <hr class="my-3" />
+
+                                <dt class="col-sm-4">Event Id</dt>
+                                <dd class="col-sm-8">@_details.EventId</dd>
+
+                                <dt class="col-sm-4">Title</dt>
+                                <dd class="col-sm-8">@_details.EventTitle</dd>
+
+                                <dt class="col-sm-4">Venue</dt>
+                                <dd class="col-sm-8">@_details.Venue</dd>
+
+                                <dt class="col-sm-4">Discipline</dt>
+                                <dd class="col-sm-8">@_details.Discipline</dd>
+
+                                <dt class="col-sm-4">Distance</dt>
+                                <dd class="col-sm-8">@_details.DistanceCode</dd>
+
+                                <dt class="col-sm-4">Event Active</dt>
+                                <dd class="col-sm-8">@(_details.EventActive == true ? "Yes" : "No")</dd>
+                            </dl>
+
+                            @* Buttons required under details *@
+                            <div class="d-flex gap-2 mt-3">
+                                <button class="btn btn-outline-secondary"
+                                        type="button"
+                                        @onclick="GoToResultsPage">
+                                    View results
+                                </button>
+
+                                <button class="btn btn-outline-primary"
+                                        type="button"
+                                        @onclick="BeginEditDetails">
+                                    Edit date/title
+                                </button>
+
+                                <button class="btn btn-success"
+                                        type="button"
+                                        @onclick="GoToCreateRaceEventPage">
+                                    New race event
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            @* ----------------------------
+                               EDIT PANEL (date + title only)
+                               - date belongs to RaceEvent
+                               - title belongs to Event template (so we treat it separately)
+                               ---------------------------- *@
+
+                            <EditForm Model="_editDetailsModel" OnValidSubmit="SaveDetailsEditsAsync">
+                                <DataAnnotationsValidator />
+
+                                <div class="mb-3">
+                                    <label class="form-label">Title (Event)</label>
+                                    <InputText class="form-control" @bind-Value="_editDetailsModel.EventTitle" />
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">Date (RaceEvent)</label>
+                                    @* DateOnly support in InputDate varies by template; easiest is string binding *@
+                                    <InputText class="form-control" @bind-Value="_editDetailsDateText" placeholder="YYYY-MM-DD" />
+                                    <div class="form-text">Format: YYYY-MM-DD</div>
+                                </div>
+
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-primary" type="submit">Save</button>
+                                    <button class="btn btn-secondary" type="button" @onclick="CancelEditDetails">Cancel</button>
+                                </div>
+                            </EditForm>
+                        }
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_detailsError))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@_detailsError</div>
+                    }
+                </div>
+            </div>
+        </div>
+
+    </div>
+}
+
+
+
+
+
+

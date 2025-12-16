@@ -1,0 +1,138 @@
+﻿@rendermode InteractiveServer
+@page "/competitions"
+
+@* We only reference the service layer + DTOs here (no EF entities) *@
+@using RRCServices
+@inject CompetitionService Service
+
+<h3>Competitions</h3>
+
+@* 
+   If _items is null we haven't loaded data yet.
+   Once we assign _items, Blazor will re-render and show the table.
+*@
+@if (_items is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    @* 
+       LIST VIEW
+       - Shows active competitions only (because the service filters Active==true).
+       - Inline edit is controlled by _editingId.
+    *@
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 90px;">Id</th>
+                <th>Title</th>
+                <th style="width: 180px;">Code</th>
+                <th style="width: 340px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var c in _items)
+            {
+                <tr>
+                    <td>@c.Id</td>
+
+                    <td>
+                        @* If this row is currently being edited, show inputs. Otherwise show text *@
+                        @if (_editingId == c.Id)
+                        {
+                            <InputText class="form-control" @bind-Value="_editModel.Title" />
+                        }
+                        else
+                        {
+                            @c.Title
+                        }
+                    </td>
+
+                    <td>
+                        @if (_editingId == c.Id)
+                        {
+                            <InputText class="form-control" @bind-Value="_editModel.Code" />
+                        }
+                        else
+                        {
+                            @c.Code
+                        }
+                    </td>
+
+                    <td>
+                        @if (_editingId == c.Id)
+                        {
+                            @*
+                               EDIT MODE BUTTONS
+                               - Save triggers SaveEditAsync, which calls Service.UpdateAsync(dto)
+                               - Cancel exits edit mode without saving
+                            *@
+                            <button class="btn btn-primary me-2" type="button" @onclick="SaveEditAsync">Save</button>
+                            <button class="btn btn-secondary" type="button" @onclick="CancelEdit">Cancel</button>
+                        }
+                        else
+                        {
+                            @*
+                               VIEW MODE BUTTONS
+                               - Edit switches the row into edit mode (no DB call)
+                               - Soft delete sets Active=false (record disappears after reload)
+                               - Hard delete permanently removes record (use with care)
+                            *@
+                            <button class="btn btn-outline-primary me-2" type="button" @onclick="() => StartEdit(c)">Edit</button>
+
+                            <button class="btn btn-outline-warning me-2" type="button"
+                                    title="Soft delete (Active=false)"
+                                    @onclick="() => SoftDeleteAsync(c.Id)">
+                                Soft delete
+                            </button>
+
+                            <button class="btn btn-outline-danger" type="button"
+                                    title="Hard delete (permanent)"
+                                    @onclick="() => HardDeleteAsync(c.Id)">
+                                Hard delete
+                            </button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <hr />
+
+    @*
+       ADD FORM
+       - Uses a separate DTO instance (_newModel)
+       - When submitted, it calls AddAsync -> Service.AddAsync(dto) -> reloads list
+    *@
+    <h5>Add new competition</h5>
+
+    <EditForm Model="_newModel" OnValidSubmit="AddAsync">
+        @* If you later add [Required] attributes to the DTO, this enables automatic validation *@
+        <DataAnnotationsValidator />
+
+        <div class="row g-2">
+            <div class="col-md-6">
+                <InputText class="form-control" placeholder="Title" @bind-Value="_newModel.Title" />
+            </div>
+
+            <div class="col-md-3">
+                <InputText class="form-control" placeholder="Code" @bind-Value="_newModel.Code" />
+            </div>
+
+            <div class="col-md-3">
+                <button class="btn btn-success w-100" type="submit">Add</button>
+            </div>
+        </div>
+    </EditForm>
+
+    @* Show any error message *@
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger mt-3">@_error</div>
+    }
+}
+
+
+

@@ -1,0 +1,117 @@
+﻿@rendermode InteractiveServer
+@page "/distances"
+
+@using RRCServices
+@inject DistanceService Service
+
+<h3>Distances</h3>
+
+@if (_items is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Code</th>
+                <th>Name</th>
+                <th>Meters</th>
+                <th style="width: 260px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var d in _items)
+            {
+                <tr>
+                    <td>
+                        @if (_editingId == d.EFKey)
+                        {
+                            <InputText class="form-control" @bind-Value="_editModel.Code" />
+                        }
+                        else
+                        {
+                            @d.Code
+                        }
+                    </td>
+
+                    <td>
+                        @if (_editingId == d.EFKey)
+                        {
+                            <InputText class="form-control" @bind-Value="_editModel.Name" />
+                        }
+                        else
+                        {
+                            @d.Name
+                        }
+                    </td>
+
+                    <td>
+                        @if (_editingId == d.EFKey)
+                        {
+                            <InputNumber class="form-control" @bind-Value="_editModel.Meters" />
+                        }
+                        else
+                        {
+                            @d.Meters
+                        }
+                    </td>
+
+                    <td>
+                        @if (_editingId == d.EFKey)
+                        {
+                            <EditForm Model="_editModel" OnValidSubmit="SaveEditAsync">
+                                <DataAnnotationsValidator />
+
+                                <button class="btn btn-primary me-2" type="submit">Save</button>
+                                <button class="btn btn-secondary" type="button" @onclick="CancelEdit">Cancel</button>
+                            </EditForm>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-primary me-2" type="button" @onclick="() => StartEdit(d)">Edit</button>
+                            <button class="btn btn-outline-danger" type="button" @onclick="() => DeleteAsync(d.EFKey)">Delete</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <hr />
+
+    <h5>Add new</h5>
+
+    <EditForm Model="_newModel" OnValidSubmit="AddAsync">
+        <DataAnnotationsValidator />
+
+        <div class="row g-2">
+            <div class="col-md-3">
+                <InputText class="form-control" placeholder="Code" @bind-Value="_newModel.Code" />
+            </div>
+
+            <div class="col-md-5">
+                <InputText class="form-control" placeholder="Name" @bind-Value="_newModel.Name" />
+            </div>
+
+            <div class="col-md-2">
+                <InputNumber class="form-control" placeholder="Meters" @bind-Value="_newModel.Meters" />
+            </div>
+
+            <div class="col-md-2">
+                <button class="btn btn-success w-100" type="submit">Add</button>
+            </div>
+        </div>
+    </EditForm>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger mt-3">@_error</div>
+    }
+}
+
+
+
+
+
