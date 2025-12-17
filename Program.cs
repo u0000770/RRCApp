@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using RRCApp.Components;
 using RRCDataModel.Data;
 using RRCServices;
+using RRCServices.Runner;
 
 namespace RRCApp
 {
@@ -22,6 +23,8 @@ namespace RRCApp
             builder.Services.AddScoped<ITrophyCalculator, TrophyCalculator>();
             builder.Services.AddScoped<ITimeFormatter, TimeFormatter>();
             builder.Services.AddScoped<IRaceResultService,RaceResultService>();
+            builder.Services.AddScoped<IRunnerService,RunnerService>();
+
 
             // Add services to the container.
             builder.Services.AddRazorComponents()

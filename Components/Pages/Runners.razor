@@ -1,0 +1,97 @@
+﻿@page "/runners"
+@using RRCServices.Runner
+@inject IRunnerService RunnerService
+@inject NavigationManager Nav
+
+<h3>Runners</h3>
+
+<div class="row g-2 align-items-end mb-3">
+    <div class="col-12 col-md-5">
+        <label class="form-label">Search by name</label>
+        <input class="form-control"
+               placeholder="e.g. Smith or John Smith"
+               @bind="SearchText"
+               @bind:event="oninput"
+               @onkeydown="HandleSearchKeyDown" />
+    </div>
+
+    <div class="col-12 col-md-3">
+        <div class="form-check mt-4">
+            <input class="form-check-input" type="checkbox" id="incInactive"
+                   @bind="IncludeInactive" />
+            <label class="form-check-label" for="incInactive">
+                Include inactive
+            </label>
+        </div>
+    </div>
+
+    <div class="col-12 col-md-4 d-flex gap-2">
+        <button class="btn btn-primary mt-4" @onclick="LoadAsync" disabled="@IsBusy">
+            @(IsBusy ? "Searching..." : "Search")
+        </button>
+
+        <button class="btn btn-outline-secondary mt-4" @onclick="ClearAsync" disabled="@IsBusy">
+            Clear
+        </button>
+
+        <button class="btn btn-success mt-4 ms-auto" @onclick="GoCreate">
+            + New Runner
+        </button>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Error))
+{
+    <div class="alert alert-danger">@Error</div>
+}
+
+@if (IsBusy)
+{
+    <div class="alert alert-info">Loading runners...</div>
+}
+else if (Items.Count == 0)
+{
+    <div class="alert alert-secondary">No runners found.</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>UKAN</th>
+                    <th>Gender</th>
+                    <th style="width:140px;">Active</th>
+                    <th style="width:120px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Items)
+                {
+                    <tr class="@RowClass(r)">
+                        <td>@r.Name</td>
+                        <td>@(string.IsNullOrWhiteSpace(r.Ukan) ? "-" : r.Ukan)</td>
+                        <td>@r.Gender</td>
+                        <td>
+                            <input type="checkbox"
+                                   class="form-check-input"
+                                   checked="@(r.Active == true)"
+                                   @onchange="(e) => ToggleActiveAsync(r, e)"
+                                   disabled="@IsBusy" />
+                        </td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-primary"
+                                    @onclick="() => GoDetails(r.Id)">
+                                Details
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+
+
