@@ -1,8 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using RRCApp.Components;
+using RRCApp.Season;
 using RRCDataModel.Data;
 using RRCServices;
 using RRCServices.Runner;
+using RRCServices.Season;
+
+
 
 namespace RRCApp
 {
@@ -24,6 +28,32 @@ namespace RRCApp
             builder.Services.AddScoped<ITimeFormatter, TimeFormatter>();
             builder.Services.AddScoped<IRaceResultService,RaceResultService>();
             builder.Services.AddScoped<IRunnerService,RunnerService>();
+
+
+            
+
+            builder.Services.Configure<SeasonSettings>(
+                builder.Configuration.GetSection("SeasonSettings"));
+
+            // Defaults live in appsettings.json (WEB APP)
+            builder.Services.Configure<SeasonSettings>(
+                builder.Configuration.GetSection("SeasonSettings"));
+
+            // Choose a persistence file path (NOT appsettings.json)
+            // This creates: <contentroot>/App_Data/seasonSettings.json
+            var seasonSettingsPath = Path.Combine(
+                builder.Environment.ContentRootPath,
+                "App_Data",
+                "seasonSettings.json");
+
+            builder.Services.AddSingleton<ISeasonSettingsStore>(
+                _ => new JsonSeasonSettingsStore(seasonSettingsPath));
+
+            // Service can be Singleton because:
+            // - settings are global
+            // - it uses a thread-safe store + in-memory cache
+            builder.Services.AddSingleton<ISeasonSettingsService, SeasonSettingsService>();
+
 
 
             // Add services to the container.
