@@ -23,6 +23,7 @@ namespace RRCApp
             builder.Services.AddScoped<CompetitionService>();
             builder.Services.AddScoped<DisciplineService>();
             builder.Services.AddScoped<EventService>();
+            builder.Services.AddScoped<CalculatorService>();
             builder.Services.AddScoped<IRaceEventService, RaceEventService>();
             builder.Services.AddScoped<ITrophyCalculator, TrophyCalculator>();
             builder.Services.AddScoped<ITimeFormatter, TimeFormatter>();
