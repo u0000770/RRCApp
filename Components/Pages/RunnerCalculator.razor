@@ -1,0 +1,496 @@
+﻿@page "/calcrunnerrace"
+@rendermode InteractiveServer
+@using System.Globalization
+@using System.Text.RegularExpressions
+@using RRCServices.Clock
+@using RRCServices.Runner
+@using RRCServices
+
+@inject NavigationManager Nav
+@inject IRunnerService RunnerService
+@inject IRaceEventService RaceEventService
+@inject IClock Clock
+
+<PageTitle>Race Calculator</PageTitle>
+
+<h3>Race Calculator</h3>
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else if (_runner is null)
+{
+    <div class="alert alert-warning">
+        Runner not found.
+    </div>
+    <button class="btn btn-secondary" @onclick="BackToRunners">Back</button>
+}
+else
+{
+    <div class="mb-3">
+        <strong>Runner:</strong> @_runner.Name
+        @if (!string.IsNullOrWhiteSpace(_runner.Ukan))
+        {
+            <span class="text-muted">(@_runner.Ukan)</span>
+        }
+        <div class="text-muted">
+            Hypothetical today: <strong>@Clock.Now.ToString("dd MMM yyyy")</strong>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+
+            <div class="mb-3">
+                <label class="form-label">Select race event (past 3 + next 3)</label>
+
+                @if (_raceEvents.Count == 0)
+                {
+                    <div class="alert alert-info mb-0">
+                        No race events found around the selected "today" date.
+                    </div>
+                }
+                else
+                {
+                    <!-- ✅ Option A: @bind only (no @onchange), react in property setter -->
+                    <select class="form-select" @bind="SelectedRaceEventId">
+                        <option value="">-- choose a race event --</option>
+
+                        @if (_past3.Count > 0)
+                        {
+                            <optgroup label="Past (most recent first)">
+                                @foreach (var re in _past3)
+                                {
+                                    <option value="@re.RaceEventId">
+                                        @FormatRaceEvent(re)
+                                    </option>
+                                }
+                            </optgroup>
+                        }
+
+                        @if (_next3.Count > 0)
+                        {
+                            <optgroup label="Upcoming (soonest first)">
+                                @foreach (var re in _next3)
+                                {
+                                    <option value="@re.RaceEventId">
+                                        @FormatRaceEvent(re)
+                                    </option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                }
+            </div>
+
+            @if (_selectedRaceEvent is not null)
+            {
+                <div class="mb-3">
+                    <div>
+                        <strong>Selected:</strong> @FormatRaceEvent(_selectedRaceEvent)
+                    </div>
+
+                    @if (_existingForSelected is not null && _existingForSelected.TargetTime > 0)
+                    {
+                        <div class="alert alert-warning mt-2 mb-0">
+                            This runner already has a target time for this race:
+                            <strong>@_existingForSelected.RaceTargetTime</strong>.
+                            Updating will overwrite it.
+                        </div>
+                    }
+                </div>
+
+                <div class="mb-3">
+                    <button class="btn btn-primary"
+                            @onclick="Calculate"
+                            disabled="@(_selectedRaceEvent is null)">
+                        Calculate predicted target time
+                    </button>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_calcMessage))
+                {
+                    <div class="alert alert-info">@_calcMessage</div>
+                }
+
+                @if (_predictedSeconds is not null)
+                {
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <div class="mb-2">
+                                <strong>Predicted target time:</strong>
+                                <span class="fs-5">@FormatSeconds(_predictedSeconds.Value)</span>
+                            </div>
+
+                            <button class="btn btn-success"
+                                    @onclick="ConfirmUpdate"
+                                    disabled="@_saving">
+                                Confirm update
+                            </button>
+
+                            @if (!string.IsNullOrWhiteSpace(_saveMessage))
+                            {
+                                <div class="alert alert-success mt-3 mb-0">@_saveMessage</div>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary" @onclick="BackToRunnerDetails">
+                    Back to runner details
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="BackToRunners">
+                    Back to runners list
+                </button>
+            </div>
+
+        </div>
+    </div>
+}
+
+@code {
+    // Query string: /calcrace?runnerId=123
+    [SupplyParameterFromQuery] public int runnerId { get; set; }
+
+    private bool _loading = true;
+    private bool _saving = false;
+
+    private RunnerDetailsDto? _runner;
+
+    // Race events around Clock.Now
+    private List<RaceEventListItemDTO> _raceEvents = new();
+    private List<RaceEventListItemDTO> _past3 = new();
+    private List<RaceEventListItemDTO> _next3 = new();
+
+    private int? _selectedRaceEventId;
+
+    private int? SelectedRaceEventId
+    {
+        get => _selectedRaceEventId;
+        set
+        {
+            if (_selectedRaceEventId == value) return;
+
+            _selectedRaceEventId = value;
+
+            // ✅ this is where your breakpoint should go
+            OnRaceSelectedIdChanged(value);
+        }
+    }
+
+    private void OnRaceSelectedIdChanged(int? id)
+    {
+        _predictedSeconds = null;
+        _calcMessage = null;
+        _saveMessage = null;
+        _existingForSelected = null;
+
+        if (id is null)
+        {
+            _selectedRaceEvent = null;
+            return;
+        }
+
+        _selectedRaceEvent = _raceEvents.SingleOrDefault(x => x.RaceEventId == id.Value);
+
+        if (_runner is not null && _selectedRaceEvent is not null)
+        {
+            _existingForSelected = _runner.EventTimes.FirstOrDefault(t =>
+                t.EventId == _selectedRaceEvent.EventId
+                && t.RaceDate.HasValue
+                && t.RaceDate.Value.Date == _selectedRaceEvent.Date.Date
+            );
+        }
+    }
+
+
+    private RaceEventListItemDTO? _selectedRaceEvent;
+    private EventRaceTimesDto? _existingForSelected;
+
+    private int? _predictedSeconds;
+    private string? _calcMessage;
+    private string? _saveMessage;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+
+        _predictedSeconds = null;
+        _calcMessage = null;
+        _saveMessage = null;
+
+        // Option A: reset via property so it clears selection consistently
+        SelectedRaceEventId = null;
+
+        _selectedRaceEvent = null;
+        _existingForSelected = null;
+
+        if (runnerId <= 0)
+        {
+            _runner = null;
+            _loading = false;
+            return;
+        }
+
+        _runner = await RunnerService.GetRunnerDetailsAsync(runnerId, includeInactiveTimes: false);
+
+        await LoadRaceEventsAroundToday();
+
+        _loading = false;
+    }
+
+    private async Task LoadRaceEventsAroundToday()
+    {
+        _raceEvents.Clear();
+        _past3.Clear();
+        _next3.Clear();
+
+        var from = Clock.Now.AddMonths(-6);
+        var to = Clock.Now.AddMonths(6);
+
+        _raceEvents = await RaceEventService.GetRaceEventListAsync(
+            activeOnly: true,
+            distanceCode: null,
+            from: from,
+            to: to
+        );
+
+        var today = Clock.Now.Date;
+
+        _past3 = _raceEvents
+            .Where(x => x.Date.Date < today)
+            .OrderByDescending(x => x.Date)
+            .Take(3)
+            .ToList();
+
+        _next3 = _raceEvents
+            .Where(x => x.Date.Date >= today)
+            .OrderBy(x => x.Date)
+            .Take(3)
+            .ToList();
+    }
+
+    // ✅ Option A "reaction" method: called from SelectedRaceEventId setter
+    private void ApplySelectedRaceEvent()
+    {
+        _predictedSeconds = null;
+        _calcMessage = null;
+        _saveMessage = null;
+        _existingForSelected = null;
+
+        if (_selectedRaceEventId is null)
+        {
+            _selectedRaceEvent = null;
+            return;
+        }
+
+        _selectedRaceEvent = _raceEvents.SingleOrDefault(x => x.RaceEventId == _selectedRaceEventId.Value);
+
+        if (_runner is not null && _selectedRaceEvent is not null)
+        {
+            // Best-effort match: same EventId + same date
+            _existingForSelected = _runner.EventTimes.FirstOrDefault(t =>
+                t.EventId == _selectedRaceEvent.EventId
+                && t.RaceDate.HasValue
+                && t.RaceDate.Value.Date == _selectedRaceEvent.Date.Date
+            );
+        }
+    }
+
+    private void Calculate()
+    {
+        var d = Clock.Now.Date;
+        _predictedSeconds = null;
+        _calcMessage = null;
+        _saveMessage = null;
+
+        if (_runner is null || _selectedRaceEvent is null)
+        {
+            _calcMessage = "Please select a runner and a race event.";
+            return;
+        }
+
+        var newDistanceMeters = GetRaceEventDistanceMeters(_selectedRaceEvent);
+
+        if (newDistanceMeters <= 0)
+        {
+            _calcMessage = "Could not determine the selected race distance (meters). Check your RaceEventListItemDTO.";
+            return;
+        }
+
+        var all = _runner.EventTimes.ToList();
+        var c0 = all.Count;
+        var s1 = all.Where(t => t.RaceDate.HasValue).ToList();
+        var c1 = s1.Count;
+
+        var today = Clock.Now.Date; // capture once
+        var s2 = s1.Where(t => t.RaceDate!.Value.Date < today).ToList();
+        var c2 = s2.Count;
+
+        var s3 = s2.Where(t => t.ActualSeconds.HasValue).ToList();
+        var c3 = s3.Count;
+
+        var s4 = s3.Where(t => t.ActualSeconds!.Value > 0).ToList();
+        var c4 = s4.Count;
+
+        var s5 = s4.Where(t => t.DistanceMeters.HasValue).ToList();
+        var c5 = s5.Count;
+
+        var s6 = s5.Where(t => t.DistanceMeters!.Value > 0).ToList();
+        var c6 = s6.Count;
+
+
+
+        var recent = _runner.EventTimes
+            .Where(t => t.RaceDate.HasValue && t.RaceDate.Value.Date < Clock.Now.Date)
+            .Where(t => t.ActualSeconds.HasValue && t.ActualSeconds.Value > 0)
+            .Where(t => t.DistanceMeters.HasValue && t.DistanceMeters.Value > 0)   // ✅ ensure distance exists
+            .OrderByDescending(t => t.RaceDate)
+            .Take(3)
+            .Select(t => new RecentRaceDto
+            {
+                Distance = t.DistanceMeters!.Value,          // ✅ meters
+                Actual = t.ActualSeconds!.Value              // ✅ seconds
+            })
+            .ToList();
+
+
+        if (recent.Count == 0)
+        {
+            _calcMessage = "No recent completed races (with actual times) found for this runner — cannot predict.";
+            return;
+        }
+
+
+        var predicted = CalculatorService.PredictFromRecentRaces(recent, newDistanceMeters);
+
+        if (predicted is null)
+        {
+            _calcMessage = "Prediction failed (no usable recent race data).";
+            return;
+        }
+
+        _predictedSeconds = (int)Math.Round(predicted.Value);
+        _calcMessage = $"Prediction calculated using {recent.Count} recent race(s).";
+    }
+
+    private async Task ConfirmUpdate()
+    {
+        if (_runner is null || _selectedRaceEvent is null || _predictedSeconds is null)
+            return;
+
+        _saving = true;
+        _saveMessage = null;
+
+        try
+        {
+            var dto = new EventRunnerTimeUpsertDto
+            {
+                EventId = _selectedRaceEvent.EventId,
+                RaceEventId = _selectedRaceEvent.RaceEventId,
+                TargetSeconds = _predictedSeconds,
+                Active = true,
+                ActualSeconds = null,
+                Date = _selectedRaceEvent.Date
+            };
+
+            if (_existingForSelected is not null)
+            {
+                var ok = await RunnerService.UpdateEventRunnerTimeAsync(
+                    runnerId: _runner.Id,
+                    eventRunnerTimeId: _existingForSelected.EventRunnerTimeId,
+                    dto: dto
+                );
+
+                _saveMessage = ok
+                    ? $"Updated target time to {FormatSeconds(_predictedSeconds.Value)}."
+                    : "Update failed.";
+            }
+            else
+            {
+                var newId = await RunnerService.CreateEventRunnerTimeAsync(_runner.Id, dto);
+                _saveMessage = $"Created target time ({FormatSeconds(_predictedSeconds.Value)}). New record id: {newId}";
+
+                _existingForSelected = new EventRaceTimesDto
+                {
+                    EventRunnerTimeId = newId,
+                    EventId = _selectedRaceEvent.EventId,
+                    RaceDistance = "",
+                    RaceTitle = _selectedRaceEvent.EventTitle ?? "",
+                    TargetTime = _predictedSeconds.Value,
+                    RaceTargetTime = FormatSeconds(_predictedSeconds.Value),
+                    RaceActualTime = "No Result",
+                    RaceDate = _selectedRaceEvent.Date,
+                    TimeDifference = "",
+                    AgeGrade = 0
+                };
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void BackToRunnerDetails()
+        => Nav.NavigateTo($"/runnerdetails?runnerId={runnerId}");
+
+    private void BackToRunners() => Nav.NavigateTo("/runners");
+
+    private static string FormatRaceEvent(RaceEventListItemDTO re)
+    {
+        var title = string.IsNullOrWhiteSpace(re.EventTitle) ? $"Event {re.EventId}" : re.EventTitle;
+        return $"{re.Date:dd MMM yyyy} — {title}";
+    }
+
+    private static string FormatSeconds(int seconds)
+    {
+        if (seconds <= 0) return "No Result";
+        var t = TimeSpan.FromSeconds(seconds);
+        return $"{(int)t.TotalHours:D2}h:{t.Minutes:D2}m:{t.Seconds:D2}s";
+    }
+
+    // ------------------------------------------------------------
+    // Distance helpers (self-contained)
+    // ------------------------------------------------------------
+    private static double GetRaceEventDistanceMeters(RaceEventListItemDTO re)
+    {
+        return re.DistanceMeters;
+    }
+
+    private static double ParseDistanceToMeters(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return 0;
+        s = s.Trim();
+
+        var lower = s.ToLowerInvariant();
+
+        var m = Regex.Match(lower, @"(?<num>\d+(\.\d+)?)\s*(?<unit>km|k|m|mile|miles|mi)\b");
+        if (!m.Success)
+        {
+            m = Regex.Match(lower, @"(?<num>\d+(\.\d+)?)(?<unit>km|k|m|mile|miles|mi)");
+            if (!m.Success) return 0;
+        }
+
+        var numStr = m.Groups["num"].Value;
+        var unit = m.Groups["unit"].Value;
+
+        if (!double.TryParse(numStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            return 0;
+
+        return unit switch
+        {
+            "km" or "k" => value * 1000.0,
+            "m" => value,
+            "mile" or "miles" or "mi" => value * 1609.344,
+            _ => 0
+        };
+    }
+
+    
+}
+
+

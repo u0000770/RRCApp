@@ -68,6 +68,11 @@ else
                 </button>
             }
 
+                <button class="btn btn-outline-secondary btn-sm"
+                        @onclick="() => CalcRace(RunnerId)">
+                    Calculator
+                </button>
+
             <button class="btn btn-outline-secondary btn-sm" @onclick="BackToList">
                 Back to list
             </button>
@@ -488,6 +493,9 @@ private sealed class RunnerEditFormModel
     private void BackToList()
         => Nav.NavigateTo("/runners");
 
+    private void CalcRace(int runnerId)
+     => Nav.NavigateTo($"/calcrunnerrace?runnerId={runnerId}");
+    // CalcRace
    // Edit region
 
 }

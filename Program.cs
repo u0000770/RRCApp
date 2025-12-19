@@ -3,6 +3,7 @@ using RRCApp.Components;
 using RRCApp.Season;
 using RRCDataModel.Data;
 using RRCServices;
+using RRCServices.Clock;
 using RRCServices.Runner;
 using RRCServices.Season;
 
@@ -31,7 +32,11 @@ namespace RRCApp
             builder.Services.AddScoped<IRunnerService,RunnerService>();
 
 
-            
+            builder.Services.AddScoped<IClock>(_ =>
+    new FixedClock(new DateTime(2025, 10, 1)));
+
+
+
 
             builder.Services.Configure<SeasonSettings>(
                 builder.Configuration.GetSection("SeasonSettings"));
