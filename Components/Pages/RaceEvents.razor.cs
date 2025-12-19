@@ -150,7 +150,8 @@ namespace RRCApp.Components.Pages
 
         private void GoToRaceEventPrediction()
         {
-            Nav.NavigateTo($"/raceeventprediction?raceEventId={RaceEventId}");
+            // $"/raceeventresults/{_details.RaceEventId}"
+            Nav.NavigateTo($"/raceeventprediction?raceEventId={_details.RaceEventId}");
         }
 
         // Button 2: switch details panel into edit mode (date + title only)

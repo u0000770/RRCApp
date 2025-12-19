@@ -4,6 +4,7 @@ using RRCApp.Season;
 using RRCDataModel.Data;
 using RRCServices;
 using RRCServices.Calculator;
+using RRCServices.Calculator.RRCServices;
 using RRCServices.Clock;
 using RRCServices.Runner;
 using RRCServices.Season;
@@ -31,6 +32,7 @@ namespace RRCApp
             builder.Services.AddScoped<ITimeFormatter, TimeFormatter>();
             builder.Services.AddScoped<IRaceResultService,RaceResultService>();
             builder.Services.AddScoped<IRunnerService,RunnerService>();
+            builder.Services.AddScoped<IRacePredictionService, RacePredictionService>();
 
 
             builder.Services.AddScoped<IClock>(_ =>

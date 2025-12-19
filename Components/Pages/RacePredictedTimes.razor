@@ -1,0 +1,182 @@
+﻿@page "/raceeventprediction"
+@rendermode InteractiveServer
+
+@using RRCServices.Calculator.RRCServices  @* adjust if your namespace differs *@
+@inject IRacePredictionService PredictionService
+
+<PageTitle>Race Targets</PageTitle>
+
+<h1>Race Targets</h1>
+
+
+
+<div class="d-flex gap-2 mb-4">
+    <button class="btn btn-primary"
+            @onclick="RunPrediction"
+            disabled="@_running">
+        @(_running ? "Running..." : "Run prediction (Calculate Times)")
+    </button>
+
+    <button class="btn btn-success"
+            @onclick="ConfirmApply"
+            disabled="@(_running || _results.Count == 0)">
+        Confirm (publish targets)
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_info))
+{
+    <div class="alert alert-info">@_info</div>
+}
+
+@if (_results.Count > 0)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h4 class="mb-1">@_raceTitle</h4>
+            <div class="text-muted">Race date: <strong>@_raceDateText</strong></div>
+            <div class="text-muted">Predictions: <strong>@_results.Count</strong> runner(s)</div>
+        </div>
+    </div>
+
+    <table class="table table-striped table-sm align-middle">
+        <thead>
+            <tr>
+                <th>UKAN</th>
+                <th>Runner Predicted</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in _results)
+            {
+                <tr>
+                    <td>@(string.IsNullOrWhiteSpace(row.Ukan) ? "-" : row.Ukan)</td>
+                    <td>@FormatHms(row.PredictedTargetSeconds)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    // query string: /raceeventprediction?raceEventId=123
+    [SupplyParameterFromQuery(Name = "raceEventId")]
+    public int RaceEventId { get; set; }
+
+    private readonly int _lastN = 3; // business rule
+
+    private bool _running;
+    private string? _error;
+    private string? _info;
+
+    private List<RunnerPredictionDto> _results = new();
+
+    private string _raceTitle = "";
+    private string _raceDateText = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // If the URL has a raceEventId, auto-load predictions
+        if (RaceEventId > 0)
+        {
+            await RunPrediction();
+        }
+    }
+
+    private async Task RunPrediction()
+    {
+        _running = true;
+        _error = null;
+        _info = null;
+        _results.Clear();
+        _raceTitle = "";
+        _raceDateText = "";
+
+        try
+        {
+            if (RaceEventId <= 0)
+            {
+                _error = "Please enter a valid Race Event Id.";
+                return;
+            }
+
+            var res = await PredictionService.PredictTargetsForRaceEventAsync(
+                raceEventId: RaceEventId,
+                lastN: _lastN);
+
+            _results = res ?? new List<RunnerPredictionDto>();
+
+            if (_results.Count == 0)
+            {
+                _info = "No predictions returned (no eligible runners or race event not found/active).";
+                return;
+            }
+
+            // derive race details from first row (all rows share the same event)
+            var first = _results[0];
+            _raceTitle = string.IsNullOrWhiteSpace(first.EventTitle) ? $"Race Event {RaceEventId}" : first.EventTitle;
+            _raceDateText = first.RaceDate.ToString("dd MMM yyyy");
+
+            // optional sort: fastest first
+            _results = _results
+                .Where(x => x.PredictedTargetSeconds.HasValue && x.PredictedTargetSeconds.Value > 0)
+                .OrderBy(x => x.PredictedTargetSeconds)
+                .ToList();
+
+            _info = $"Predictions generated and staged into Memory - press Confirm to PUBLISH them (last {_lastN} races).";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private async Task ConfirmApply()
+    {
+        _running = true;
+        _error = null;
+        _info = null;
+
+        try
+        {
+            if (RaceEventId <= 0)
+            {
+                _error = "Please enter a valid Race Event Id.";
+                return;
+            }
+
+            var result = await PredictionService.ApplyPredictionsForRaceEventAsync(RaceEventId);
+
+            _info = result?.Message
+                ?? "Apply complete.";
+
+            // Optionally re-run predictions to reflect any future UI enhancements
+            // (not strictly required for this simplified table)
+            // await RunPrediction();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private static string FormatHms(int? seconds)
+    {
+        if (!seconds.HasValue || seconds.Value <= 0) return "-";
+        var ts = TimeSpan.FromSeconds(seconds.Value);
+        return $"{(int)ts.TotalHours:D2}:{ts.Minutes:D2}:{ts.Seconds:D2}";
+    }
+}
