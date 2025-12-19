@@ -1,4 +1,5 @@
-﻿using RRCServices;
+﻿using Microsoft.AspNetCore.Components;
+using RRCServices;
 
 namespace RRCApp.Components.Pages
 {
@@ -143,6 +144,13 @@ namespace RRCApp.Components.Pages
             // TODO: implement this page later
             // Example route: /raceevents/create
             Nav.NavigateTo("/raceevents/create");
+        }
+
+        [Parameter] public int RaceEventId { get; set; }
+
+        private void GoToRaceEventPrediction()
+        {
+            Nav.NavigateTo($"/raceeventprediction?raceEventId={RaceEventId}");
         }
 
         // Button 2: switch details panel into edit mode (date + title only)

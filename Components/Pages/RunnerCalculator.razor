@@ -2,9 +2,10 @@
 @rendermode InteractiveServer
 @using System.Globalization
 @using System.Text.RegularExpressions
+@using RRCServices
+@using RRCServices.Calculator
 @using RRCServices.Clock
 @using RRCServices.Runner
-@using RRCServices
 
 @inject NavigationManager Nav
 @inject IRunnerService RunnerService
@@ -461,34 +462,34 @@ else
         return re.DistanceMeters;
     }
 
-    private static double ParseDistanceToMeters(string? s)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return 0;
-        s = s.Trim();
+    // private static double ParseDistanceToMeters(string? s)
+    // {
+    //     if (string.IsNullOrWhiteSpace(s)) return 0;
+    //     s = s.Trim();
 
-        var lower = s.ToLowerInvariant();
+    //     var lower = s.ToLowerInvariant();
 
-        var m = Regex.Match(lower, @"(?<num>\d+(\.\d+)?)\s*(?<unit>km|k|m|mile|miles|mi)\b");
-        if (!m.Success)
-        {
-            m = Regex.Match(lower, @"(?<num>\d+(\.\d+)?)(?<unit>km|k|m|mile|miles|mi)");
-            if (!m.Success) return 0;
-        }
+    //     var m = Regex.Match(lower, @"(?<num>\d+(\.\d+)?)\s*(?<unit>km|k|m|mile|miles|mi)\b");
+    //     if (!m.Success)
+    //     {
+    //         m = Regex.Match(lower, @"(?<num>\d+(\.\d+)?)(?<unit>km|k|m|mile|miles|mi)");
+    //         if (!m.Success) return 0;
+    //     }
 
-        var numStr = m.Groups["num"].Value;
-        var unit = m.Groups["unit"].Value;
+    //     var numStr = m.Groups["num"].Value;
+    //     var unit = m.Groups["unit"].Value;
 
-        if (!double.TryParse(numStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
-            return 0;
+    //     if (!double.TryParse(numStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+    //         return 0;
 
-        return unit switch
-        {
-            "km" or "k" => value * 1000.0,
-            "m" => value,
-            "mile" or "miles" or "mi" => value * 1609.344,
-            _ => 0
-        };
-    }
+    //     return unit switch
+    //     {
+    //         "km" or "k" => value * 1000.0,
+    //         "m" => value,
+    //         "mile" or "miles" or "mi" => value * 1609.344,
+    //         _ => 0
+    //     };
+    // }
 
     
 }
