@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RRCServices", "..\RRCServic
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Calculator", "..\Calculator\Calculator.csproj", "{F9381852-A90E-456A-A239-E2916969248B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PublicApp", "..\PublicApp\PublicApp.csproj", "{B41E148B-8EF4-4E66-82B5-438B4CB098BF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -33,6 +35,10 @@ Global
 		{F9381852-A90E-456A-A239-E2916969248B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F9381852-A90E-456A-A239-E2916969248B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F9381852-A90E-456A-A239-E2916969248B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B41E148B-8EF4-4E66-82B5-438B4CB098BF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B41E148B-8EF4-4E66-82B5-438B4CB098BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B41E148B-8EF4-4E66-82B5-438B4CB098BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B41E148B-8EF4-4E66-82B5-438B4CB098BF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -19,8 +19,15 @@ namespace RRCApp
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            //        builder.Services.AddDbContextFactory<RRCContext>(options =>
+            //options.UseSqlServer(builder.Configuration.GetConnectionString("RRC")));
+
+            var cs = builder.Configuration.GetConnectionString("RRCAzure");
+            if (string.IsNullOrWhiteSpace(cs))
+                throw new InvalidOperationException("Connection string 'RRCAzure' not found.");
+
             builder.Services.AddDbContextFactory<RRCContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("RRC")));
+                options.UseSqlServer(cs));
 
             builder.Services.AddScoped<DistanceService>();
             builder.Services.AddScoped<CompetitionService>();
@@ -35,8 +42,8 @@ namespace RRCApp
             builder.Services.AddScoped<IRacePredictionService, RacePredictionService>();
 
 
-            builder.Services.AddScoped<IClock>(_ =>
-    new FixedClock(new DateTime(2025, 10, 1)));
+            builder.Services.AddScoped<IClock, SystemClock>();
+
 
 
 

@@ -39,6 +39,9 @@ namespace RRCApp.Components.Pages
 
         protected override async Task OnInitializedAsync()
         {
+            // Default: latest event first on initial load
+            _sortColumn = "Date";
+            _sortAscending = false;
             await ReloadListAsync();
         }
 
