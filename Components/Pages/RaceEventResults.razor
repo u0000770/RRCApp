@@ -29,8 +29,10 @@ else
     </div>
 
     <!-- Add/Set actual time for a runner (must already have predicted row) -->
+    <!-- ✅ Two-step: Find runner (confirm predicted) -> then Add actual -->
     <div class="card mb-3">
         <div class="card-body">
+
             <div class="d-flex flex-column flex-md-row gap-2 align-items-md-end">
                 <div style="min-width:260px;">
                     <label class="form-label mb-1">Find runner</label>
@@ -41,7 +43,9 @@ else
 
                     @if (_addCandidates.Count > 0)
                     {
-                        <select class="form-select mt-2" @bind="_addRunnerId">
+                        <select class="form-select mt-2"
+                                @bind="_addRunnerId"
+                                @bind:after="OnAddRunnerSelected">
                             <option value="">-- select runner --</option>
                             @foreach (var r in _addCandidates)
                             {
@@ -51,21 +55,40 @@ else
                     }
                 </div>
 
+                <div>
+                    <button class="btn btn-outline-primary"
+                            disabled="@(_saving || _addRunnerId is null)"
+                            @onclick="FindPredictedForSelectedAsync">
+                        Find predicted row
+                    </button>
+                </div>
+
+                <div class="flex-grow-1"></div>
+
                 <div style="min-width:180px;">
                     <label class="form-label mb-1">Actual time (HH:MM:SS)</label>
                     <input class="form-control"
                            placeholder="00:00:00"
-                           @bind="_addActualHms" />
+                           @bind="_addActualHms"
+                           disabled="@(_selectedAddRow is null)" />
                 </div>
 
                 <div>
                     <button class="btn btn-success"
-                            disabled="@(_saving || _addRunnerId is null)"
-                            @onclick="AddActualForRunnerAsync">
+                            disabled="@(_saving || _selectedAddRow is null)"
+                            @onclick="AddActualForSelectedAsync">
                         Add / Set actual
                     </button>
                 </div>
             </div>
+
+            @if (_selectedAddRow is not null)
+            {
+                <div class="alert alert-info mt-3 mb-0">
+                    <div><strong>Selected:</strong> @_selectedAddRow.RunnerName (@_selectedAddRow.Ukan)</div>
+                    <div><strong>Predicted:</strong> @_selectedAddRow.PredictedTime</div>
+                </div>
+            }
 
             @if (!string.IsNullOrWhiteSpace(_addMessage))
             {
@@ -73,6 +96,7 @@ else
             }
         </div>
     </div>
+
 
     @if (_rows.Count == 0)
     {
@@ -313,4 +337,48 @@ else
         var ts = TimeSpan.FromSeconds(totalSeconds);
         return $"{(int)ts.TotalHours:00}:{ts.Minutes:00}:{ts.Seconds:00}";
     }
+
+    private RaceResultRowDTO? _selectedAddRow;
+
+    private void OnAddRunnerSelected()
+    {
+        // reset confirmation when dropdown changes
+        _selectedAddRow = null;
+        _addMessage = null;
+        _addActualHms = null;
+    }
+
+    private Task FindPredictedForSelectedAsync()
+    {
+        _addMessage = null;
+        _selectedAddRow = null;
+
+        if (_addRunnerId is null || _page is null)
+            return Task.CompletedTask;
+
+        // confirm they already have a predicted row for this race
+        var row = _page.Results.FirstOrDefault(r => r.RunnerId == _addRunnerId.Value);
+
+        if (row is null)
+        {
+            _addMessage = "No predicted entry found for that runner for this race.";
+            return Task.CompletedTask;
+        }
+
+        _selectedAddRow = row;
+        _addMessage = "Predicted entry found. Enter an actual time to save.";
+        return Task.CompletedTask;
+    }
+
+    private async Task AddActualForSelectedAsync()
+    {
+        _addMessage = null;
+
+        if (_selectedAddRow is null)
+            return;
+
+        // Reuse your existing save logic (this is the key: it uses EventRunnerTimeId from the confirmed row)
+        await SaveActualAsync(_selectedAddRow, _addActualHms);
+    }
+
 }
