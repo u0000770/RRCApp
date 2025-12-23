@@ -28,7 +28,7 @@ else
         <div><strong>Distance:</strong> @_page.DistanceCode</div>
     </div>
 
-    <!-- ✅ Add runner actual time (runner must already have predicted row) -->
+    <!-- Add/Set actual time for a runner (must already have predicted row) -->
     <div class="card mb-3">
         <div class="card-body">
             <div class="d-flex flex-column flex-md-row gap-2 align-items-md-end">
@@ -74,7 +74,7 @@ else
         </div>
     </div>
 
-    @if (_page.Results.Count == 0)
+    @if (_rows.Count == 0)
     {
         <p class="text-muted">No results available for this race event.</p>
     }
@@ -85,41 +85,44 @@ else
                 <tr>
                     <th>Name</th>
                     <th style="width:170px;">Predicted Time</th>
+                    <th style="width:170px;">Actual Time</th>
                     <th style="width:260px;">Actual Time (edit)</th>
-                    <th style="width:150px;">Diff (sec)</th>
+                    <th style="width:120px;">Diff (sec)</th>
                     <th style="width:120px;">Trophy Time</th>
                     <th style="width:120px;">Trophy Points</th>
                 </tr>
             </thead>
             <tbody>
-                @foreach (var r in _page.Results)
+                @foreach (var row in _rows)
                 {
                     <tr>
-                        <td>@r.RunnerName</td>
+                        <td>@row.Dto.RunnerName</td>
 
                         <!-- Predicted is read-only -->
-                        <td>@r.PredictedTime</td>
+                        <td>@row.Dto.PredictedTime</td>
 
-                        <!-- ✅ Inline edit actual (pre-filled) -->
+                        <!-- Actual (display, from service) -->
+                        <td>@row.Dto.ActualTime</td>
+
+                        <!-- Actual (edit, per-row binding) -->
                         <td>
                             <div class="d-flex gap-2">
                                 <input class="form-control form-control-sm"
                                        style="max-width:140px;"
                                        placeholder="00:00:00"
-                                       @bind="_editActualHmsByErtId[r.EventRunnerTimeId]"
-                                       @bind:event="oninput" />
+                                       @bind="row.EditActualHms" />
 
                                 <button class="btn btn-primary btn-sm"
                                         disabled="@_saving"
-                                        @onclick="() => SaveActualAsync(r)">
+                                        @onclick="() => SaveActualAsync(row.Dto, row.EditActualHms)">
                                     Save
                                 </button>
                             </div>
                         </td>
 
-                        <td>@r.TimeDifferenceSeconds</td>
-                        <td>@(r.TrophyTimeSeconds?.ToString() ?? "")</td>
-                        <td>@r.TrophyPoints</td>
+                        <td>@row.Dto.TimeDifferenceSeconds</td>
+                        <td>@(row.Dto.TrophyTimeSeconds?.ToString() ?? "")</td>
+                        <td>@row.Dto.TrophyPoints</td>
                     </tr>
                 }
             </tbody>
@@ -142,8 +145,14 @@ else
 
     private RaceResultPageDTO? _page;
 
-    // EventRunnerTimeId -> "HH:MM:SS"
-    private readonly Dictionary<int, string> _editActualHmsByErtId = new();
+    // Per-row UI model to avoid shared edit state
+    private sealed class ResultRowVm
+    {
+        public required RaceResultRowDTO Dto { get; init; }
+        public string EditActualHms { get; set; } = "";
+    }
+
+    private List<ResultRowVm> _rows = new();
 
     // Add runner UI state
     private string? _addSearch;
@@ -161,38 +170,27 @@ else
     {
         _loading = true;
         _error = null;
-        _page = null;
         _saveMessage = null;
+        _page = null;
+        _rows = new();
 
         try
         {
-            // ✅ show predicted rows even if actual not entered yet
+            // show predicted rows even if actual not entered yet
             _page = await ResultsService.GetResultsForRaceEventAsync(
                 RaceEventId,
                 includeOnlyCompleteTimes: false);
 
-            _editActualHmsByErtId.Clear();
-
             if (_page?.Results is not null)
             {
-                foreach (var r in _page.Results)
+                _rows = _page.Results.Select(r => new ResultRowVm
                 {
-                    // ✅ PRE-FILL from existing actual (seconds preferred; string fallback)
-                    var hms = "";
-                    if (r.ActualSeconds.HasValue && r.ActualSeconds.Value > 0)
-                    {
-                        hms = SecondsToHms(r.ActualSeconds.Value);
-                    }
-                    else if (!string.IsNullOrWhiteSpace(r.ActualTime))
-                    {
-                        // If your ActualTime is already "HHh:MMm:SSs" or similar, you can optionally parse it.
-                        // For now we only accept HH:MM:SS. If it's not in that format, this just leaves it blank.
-                        if (TryNormalizeHms(r.ActualTime!, out var normalized))
-                            hms = normalized;
-                    }
-
-                    _editActualHmsByErtId[r.EventRunnerTimeId] = hms;
-                }
+                    Dto = r,
+                    // ✅ Prefill edit field from actual seconds if present
+                    EditActualHms = r.ActualSeconds.HasValue && r.ActualSeconds.Value > 0
+                        ? SecondsToHms(r.ActualSeconds.Value)
+                        : ""
+                }).ToList();
             }
         }
         catch (Exception ex)
@@ -221,17 +219,40 @@ else
             .ToList();
     }
 
-    private async Task SaveActualAsync(RaceResultRowDTO row)
+    private async Task AddActualForRunnerAsync()
+    {
+        _addMessage = null;
+        _saveMessage = null;
+
+        if (_page is null || _addRunnerId is null)
+            return;
+
+        if (!TryParseHmsToSeconds(_addActualHms, out var seconds) || seconds <= 0)
+        {
+            _addMessage = "Enter an actual time in HH:MM:SS first (e.g. 00:42:15).";
+            return;
+        }
+
+        // Must already have predicted/target row
+        var vm = _rows.FirstOrDefault(r => r.Dto.RunnerId == _addRunnerId.Value);
+        if (vm is null)
+        {
+            _addMessage = "That runner does not have a predicted entry for this race yet.";
+            return;
+        }
+
+        vm.EditActualHms = SecondsToHms(seconds);
+        await SaveActualAsync(vm.Dto, vm.EditActualHms);
+    }
+
+    private async Task SaveActualAsync(RaceResultRowDTO row, string? editHms)
     {
         if (_page is null) return;
 
         _saveMessage = null;
         _addMessage = null;
 
-        if (!_editActualHmsByErtId.TryGetValue(row.EventRunnerTimeId, out var hms))
-            return;
-
-        if (!TryParseHmsToSeconds(hms, out var seconds) || seconds <= 0)
+        if (!TryParseHmsToSeconds(editHms, out var seconds) || seconds <= 0)
         {
             _saveMessage = "Please enter an actual time in HH:MM:SS (e.g. 00:42:15).";
             return;
@@ -242,17 +263,18 @@ else
         {
             var dto = new EventRunnerTimeUpsertDto
             {
-                EventId = row.EventId,
-                RaceEventId = RaceEventId,
-                Date = row.RaceDate,
+                EventId = _page.EventId,
+                RaceEventId = _page.RaceEventId,
+                Date = _page.Date,
                 Active = true,
-
-                // keep predicted/target as-is (read-only here)
+                
+                // keep predicted/target unchanged here
                 TargetSeconds = row.TargetSeconds,
                 ActualSeconds = seconds
             };
 
-            var ok = await RunnerService.UpdateEventRunnerTimeAsync(
+
+            var ok = await RunnerService.UpdateEventRunnerActualAsync(
                 runnerId: row.RunnerId,
                 eventRunnerTimeId: row.EventRunnerTimeId,
                 dto: dto);
@@ -265,32 +287,6 @@ else
         {
             _saving = false;
         }
-    }
-
-    private async Task AddActualForRunnerAsync()
-    {
-        _addMessage = null;
-        _saveMessage = null;
-
-        if (_page is null || _addRunnerId is null)
-            return;
-
-        if (!TryParseHmsToSeconds(_addActualHms, out var seconds) || seconds <= 0)
-        {
-            _addMessage = "Enter an actual time in HH:MM:SS first.";
-            return;
-        }
-
-        // runner must already have a predicted row
-        var row = _page.Results.FirstOrDefault(r => r.RunnerId == _addRunnerId.Value);
-        if (row is null)
-        {
-            _addMessage = "That runner does not have a predicted entry for this race yet.";
-            return;
-        }
-
-        _editActualHmsByErtId[row.EventRunnerTimeId] = SecondsToHms(seconds);
-        await SaveActualAsync(row);
     }
 
     private static bool TryParseHmsToSeconds(string? hms, out int seconds)
@@ -316,36 +312,5 @@ else
         if (totalSeconds <= 0) return "";
         var ts = TimeSpan.FromSeconds(totalSeconds);
         return $"{(int)ts.TotalHours:00}:{ts.Minutes:00}:{ts.Seconds:00}";
-    }
-
-    // Optional helper: if ActualTime comes back as "00h:37m:33s", normalize to "00:37:33"
-    private static bool TryNormalizeHms(string input, out string normalized)
-    {
-        normalized = "";
-
-        var s = input.Trim();
-
-        // Already HH:MM:SS
-        if (TryParseHmsToSeconds(s, out _))
-        {
-            normalized = s;
-            return true;
-        }
-
-        // Common legacy format: 00h:37m:33s
-        // Strip letters and replace with :
-        s = s.Replace("h", "", StringComparison.OrdinalIgnoreCase)
-             .Replace("m", "", StringComparison.OrdinalIgnoreCase)
-             .Replace("s", "", StringComparison.OrdinalIgnoreCase);
-
-        // after stripping, might be "00:37:33" already
-        s = s.Trim();
-        if (TryParseHmsToSeconds(s, out _))
-        {
-            normalized = s;
-            return true;
-        }
-
-        return false;
     }
 }
