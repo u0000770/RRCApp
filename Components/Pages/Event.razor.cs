@@ -1,5 +1,6 @@
 using RRCServices;
 
+
 namespace RRCApp.Components.Pages
 {
     public partial class Event
