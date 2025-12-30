@@ -27,8 +27,19 @@ namespace RRCApp
             if (string.IsNullOrWhiteSpace(cs))
                 throw new InvalidOperationException("Connection string 'RRCAzure' not found.");
 
+            ///
             builder.Services.AddDbContextFactory<RRCContext>(options =>
-                options.UseSqlServer(cs));
+    options.UseSqlServer(cs, sql =>
+        sql.EnableRetryOnFailure(
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromSeconds(10),
+            errorNumbersToAdd: null)));
+
+            ///
+
+
+            //builder.Services.AddDbContextFactory<RRCContext>(options =>
+            //    options.UseSqlServer(cs));
 
             builder.Services.AddScoped<DistanceService>();
             builder.Services.AddScoped<CompetitionService>();
