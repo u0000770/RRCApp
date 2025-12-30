@@ -42,7 +42,7 @@ namespace RRCApp
             builder.Services.AddScoped<IRunnerService,RunnerService>();
             builder.Services.AddScoped<IRacePredictionService, RacePredictionService>();
 
-          //  builder.Services.AddScoped<ILeagueTableService, LeagueTableService>();
+            builder.Services.AddScoped<ILeagueDataService, LeagueDataService>();
 
 
             builder.Services.AddScoped<IClock, SystemClock>();
