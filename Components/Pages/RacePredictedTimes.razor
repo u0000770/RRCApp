@@ -48,6 +48,7 @@
         <thead>
             <tr>
                 <th>UKAN</th>
+                <th>Name</th>
                 <th>Runner Predicted</th>
             </tr>
         </thead>
@@ -56,6 +57,7 @@
             {
                 <tr>
                     <td>@(string.IsNullOrWhiteSpace(row.Ukan) ? "-" : row.Ukan)</td>
+                    <td>@(string.IsNullOrWhiteSpace(row.RunnerName) ? "-" : row.RunnerName)</td>
                     <td>@FormatHms(row.PredictedTargetSeconds)</td>
                 </tr>
             }
