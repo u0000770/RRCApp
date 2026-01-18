@@ -28,8 +28,7 @@ else
         <div><strong>Distance:</strong> @_page.DistanceCode</div>
     </div>
 
-    <!-- Add/Set actual time for a runner (must already have predicted row) -->
-    <!-- ✅ Two-step: Find runner (confirm predicted) -> then Add actual -->
+    <!-- ✅ Add runner with ACTUAL time (predicted optional; create row if missing) -->
     <div class="card mb-3">
         <div class="card-body">
 
@@ -55,14 +54,6 @@ else
                     }
                 </div>
 
-                <div>
-                    <button class="btn btn-outline-primary"
-                            disabled="@(_saving || _addRunnerId is null)"
-                            @onclick="FindPredictedForSelectedAsync">
-                        Find predicted row
-                    </button>
-                </div>
-
                 <div class="flex-grow-1"></div>
 
                 <div style="min-width:180px;">
@@ -70,25 +61,17 @@ else
                     <input class="form-control"
                            placeholder="00:00:00"
                            @bind="_addActualHms"
-                           disabled="@(_selectedAddRow is null)" />
+                           disabled="@(_addRunnerId is null)" />
                 </div>
 
                 <div>
                     <button class="btn btn-success"
-                            disabled="@(_saving || _selectedAddRow is null)"
-                            @onclick="AddActualForSelectedAsync">
+                            disabled="@(_saving || _addRunnerId is null)"
+                            @onclick="AddOrSetActualForSelectedRunnerAsync">
                         Add / Set actual
                     </button>
                 </div>
             </div>
-
-            @if (_selectedAddRow is not null)
-            {
-                <div class="alert alert-info mt-3 mb-0">
-                    <div><strong>Selected:</strong> @_selectedAddRow.RunnerName (@_selectedAddRow.Ukan)</div>
-                    <div><strong>Predicted:</strong> @_selectedAddRow.PredictedTime</div>
-                </div>
-            }
 
             @if (!string.IsNullOrWhiteSpace(_addMessage))
             {
@@ -96,7 +79,6 @@ else
             }
         </div>
     </div>
-
 
     @if (_rows.Count == 0)
     {
@@ -122,7 +104,7 @@ else
                     <tr>
                         <td>@row.Dto.RunnerName</td>
 
-                        <!-- Predicted is read-only -->
+                        <!-- Predicted optional -->
                         <td>@row.Dto.PredictedTime</td>
 
                         <!-- Actual (display, from service) -->
@@ -200,21 +182,24 @@ else
 
         try
         {
-            // show predicted rows even if actual not entered yet
+            // Get all rows; we filter "actual-present" here based on what your DTO actually contains
             _page = await ResultsService.GetResultsForRaceEventAsync(
                 RaceEventId,
                 includeOnlyCompleteTimes: false);
 
             if (_page?.Results is not null)
             {
-                _rows = _page.Results.Select(r => new ResultRowVm
-                {
-                    Dto = r,
-                    // ✅ Prefill edit field from actual seconds if present
-                    EditActualHms = r.ActualSeconds.HasValue && r.ActualSeconds.Value > 0
-                        ? SecondsToHms(r.ActualSeconds.Value)
-                        : ""
-                }).ToList();
+                // ✅ IMPORTANT FIX:
+                // Your service appears to populate ActualTime (e.g. "01h:11m:22s") but not ActualSeconds,
+                // so we filter using the string and prefill edit by converting to "HH:MM:SS".
+                _rows = _page.Results
+                    .Where(r => HasActual(r))
+                    .Select(r => new ResultRowVm
+                    {
+                        Dto = r,
+                        EditActualHms = ToColonHms(r.ActualTime)
+                    })
+                    .ToList();
             }
         }
         catch (Exception ex)
@@ -225,6 +210,13 @@ else
         {
             _loading = false;
         }
+    }
+
+    private static bool HasActual(RaceResultRowDTO r)
+    {
+        // Prefer seconds if they ever start being populated, otherwise fall back to string.
+        if (r.ActualSeconds.HasValue && r.ActualSeconds.Value > 0) return true;
+        return !string.IsNullOrWhiteSpace(r.ActualTime);
     }
 
     private async Task ReloadAddCandidatesAsync()
@@ -243,7 +235,17 @@ else
             .ToList();
     }
 
-    private async Task AddActualForRunnerAsync()
+    private void OnAddRunnerSelected()
+    {
+        _addMessage = null;
+        _addActualHms = null;
+    }
+
+    /// <summary>
+    /// ✅ Add runner to results by setting ACTUAL time.
+    /// Creates EventRunnerTime if missing (predicted optional).
+    /// </summary>
+    private async Task AddOrSetActualForSelectedRunnerAsync()
     {
         _addMessage = null;
         _saveMessage = null;
@@ -257,16 +259,48 @@ else
             return;
         }
 
-        // Must already have predicted/target row
-        var vm = _rows.FirstOrDefault(r => r.Dto.RunnerId == _addRunnerId.Value);
-        if (vm is null)
+        _saving = true;
+        try
         {
-            _addMessage = "That runner does not have a predicted entry for this race yet.";
-            return;
-        }
+            // We can't reliably detect "existing row without actual" from _rows (because _rows only shows actuals).
+            // If you have a service method to look up an EventRunnerTimeId by (runnerId, raceEventId), use it here.
+            // For now we update if the runner is already in the displayed list; otherwise we create.
+            var existingDisplayed = _rows.FirstOrDefault(r => r.Dto.RunnerId == _addRunnerId.Value)?.Dto;
 
-        vm.EditActualHms = SecondsToHms(seconds);
-        await SaveActualAsync(vm.Dto, vm.EditActualHms);
+            var dto = new EventRunnerTimeUpsertDto
+            {
+                EventId = _page.EventId,
+                RaceEventId = _page.RaceEventId,
+                Date = _page.Date,
+                Active = true,
+
+                // Predicted optional; keep if we already know it, otherwise leave null (or 0 if your DTO requires int)
+                TargetSeconds = existingDisplayed?.TargetSeconds,
+                ActualSeconds = seconds
+            };
+
+            bool ok;
+
+            if (existingDisplayed is not null && existingDisplayed.EventRunnerTimeId > 0)
+            {
+                ok = await RunnerService.UpdateEventRunnerActualAsync(
+                    runnerId: existingDisplayed.RunnerId,
+                    eventRunnerTimeId: existingDisplayed.EventRunnerTimeId,
+                    dto: dto);
+            }
+            else
+            {
+                var newId = await RunnerService.CreateEventRunnerTimeAsync(_addRunnerId.Value, dto);
+                ok = newId > 0;
+            }
+
+            _addMessage = ok ? "Saved." : "Save failed.";
+            await ReloadPageAsync();
+        }
+        finally
+        {
+            _saving = false;
+        }
     }
 
     private async Task SaveActualAsync(RaceResultRowDTO row, string? editHms)
@@ -291,12 +325,11 @@ else
                 RaceEventId = _page.RaceEventId,
                 Date = _page.Date,
                 Active = true,
-                
+
                 // keep predicted/target unchanged here
                 TargetSeconds = row.TargetSeconds,
                 ActualSeconds = seconds
             };
-
 
             var ok = await RunnerService.UpdateEventRunnerActualAsync(
                 runnerId: row.RunnerId,
@@ -313,12 +346,20 @@ else
         }
     }
 
-    private static bool TryParseHmsToSeconds(string? hms, out int seconds)
+    /// <summary>
+    /// ✅ FIX: accept both "HH:MM:SS" and "HHh:MMm:SSs"
+    /// </summary>
+    private static bool TryParseHmsToSeconds(string? input, out int seconds)
     {
         seconds = 0;
-        if (string.IsNullOrWhiteSpace(hms)) return false;
+        if (string.IsNullOrWhiteSpace(input)) return false;
 
-        var parts = hms.Trim().Split(':', StringSplitOptions.RemoveEmptyEntries);
+        var s = input.Trim()
+            .Replace("h", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("m", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("s", "", StringComparison.OrdinalIgnoreCase);
+
+        var parts = s.Split(':', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 3) return false;
 
         if (!int.TryParse(parts[0], out var hh)) return false;
@@ -338,47 +379,17 @@ else
         return $"{(int)ts.TotalHours:00}:{ts.Minutes:00}:{ts.Seconds:00}";
     }
 
-    private RaceResultRowDTO? _selectedAddRow;
-
-    private void OnAddRunnerSelected()
+    /// <summary>
+    /// Converts your DTO format "01h:11m:22s" into "01:11:22" for editing.
+    /// If it's already "HH:MM:SS", it remains valid.
+    /// </summary>
+    private static string ToColonHms(string? time)
     {
-        // reset confirmation when dropdown changes
-        _selectedAddRow = null;
-        _addMessage = null;
-        _addActualHms = null;
+        if (string.IsNullOrWhiteSpace(time)) return "";
+
+        return time.Trim()
+            .Replace("h", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("m", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("s", "", StringComparison.OrdinalIgnoreCase);
     }
-
-    private Task FindPredictedForSelectedAsync()
-    {
-        _addMessage = null;
-        _selectedAddRow = null;
-
-        if (_addRunnerId is null || _page is null)
-            return Task.CompletedTask;
-
-        // confirm they already have a predicted row for this race
-        var row = _page.Results.FirstOrDefault(r => r.RunnerId == _addRunnerId.Value);
-
-        if (row is null)
-        {
-            _addMessage = "No predicted entry found for that runner for this race.";
-            return Task.CompletedTask;
-        }
-
-        _selectedAddRow = row;
-        _addMessage = "Predicted entry found. Enter an actual time to save.";
-        return Task.CompletedTask;
-    }
-
-    private async Task AddActualForSelectedAsync()
-    {
-        _addMessage = null;
-
-        if (_selectedAddRow is null)
-            return;
-
-        // Reuse your existing save logic (this is the key: it uses EventRunnerTimeId from the confirmed row)
-        await SaveActualAsync(_selectedAddRow, _addActualHms);
-    }
-
 }

@@ -13,6 +13,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Calculator", "..\Calculator
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PublicApp", "..\PublicApp\PublicApp.csproj", "{B41E148B-8EF4-4E66-82B5-438B4CB098BF}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rrc.contracts", "..\rrc.contracts\rrc.contracts.csproj", "{187FAAD9-7344-46E4-9C41-436C69866CED}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rrcapi", "..\rrcapi\rrcapi.csproj", "{DA161C26-EA8D-4DAD-B804-05F73AE3A9AF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +43,14 @@ Global
 		{B41E148B-8EF4-4E66-82B5-438B4CB098BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B41E148B-8EF4-4E66-82B5-438B4CB098BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B41E148B-8EF4-4E66-82B5-438B4CB098BF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{187FAAD9-7344-46E4-9C41-436C69866CED}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{187FAAD9-7344-46E4-9C41-436C69866CED}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{187FAAD9-7344-46E4-9C41-436C69866CED}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{187FAAD9-7344-46E4-9C41-436C69866CED}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DA161C26-EA8D-4DAD-B804-05F73AE3A9AF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DA161C26-EA8D-4DAD-B804-05F73AE3A9AF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DA161C26-EA8D-4DAD-B804-05F73AE3A9AF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DA161C26-EA8D-4DAD-B804-05F73AE3A9AF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
