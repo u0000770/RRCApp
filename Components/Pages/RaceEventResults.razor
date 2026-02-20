@@ -126,8 +126,12 @@ else
                             </div>
                         </td>
 
-                        <td>@row.Dto.TimeDifferenceSeconds</td>
-                        <td>@(row.Dto.TrophyTimeSeconds?.ToString() ?? "")</td>
+                        <td>@if(HasPredicted(row.Dto))
+                            { @row.Dto.TimeDifferenceSeconds} 
+                            else
+                            {<span>N/A</span>}
+                        </td>
+                        <td>@(row.Dto.TrophyTimeSeconds?.ToString() ?? "0")</td>
                         <td>@row.Dto.TrophyPoints</td>
                     </tr>
                 }
@@ -189,9 +193,6 @@ else
 
             if (_page?.Results is not null)
             {
-                // ✅ IMPORTANT FIX:
-                // Your service appears to populate ActualTime (e.g. "01h:11m:22s") but not ActualSeconds,
-                // so we filter using the string and prefill edit by converting to "HH:MM:SS".
                 _rows = _page.Results
                     .Where(r => HasActual(r))
                     .Select(r => new ResultRowVm
@@ -214,9 +215,15 @@ else
 
     private static bool HasActual(RaceResultRowDTO r)
     {
-        // Prefer seconds if they ever start being populated, otherwise fall back to string.
         if (r.ActualSeconds.HasValue && r.ActualSeconds.Value > 0) return true;
         return !string.IsNullOrWhiteSpace(r.ActualTime);
+    }
+
+    private static bool HasPredicted(RaceResultRowDTO r)
+    {
+        if (string.IsNullOrEmpty(r.PredictedTime)) return false;
+        else { return true; }
+
     }
 
     private async Task ReloadAddCandidatesAsync()
@@ -243,7 +250,7 @@ else
 
     /// <summary>
     /// ✅ Add runner to results by setting ACTUAL time.
-    /// Creates EventRunnerTime if missing (predicted optional).
+    /// Updates existing EventRunnerTime for (runner,raceEvent) even if it currently has no actual time.
     /// </summary>
     private async Task AddOrSetActualForSelectedRunnerAsync()
     {
@@ -253,7 +260,7 @@ else
         if (_page is null || _addRunnerId is null)
             return;
 
-        if (!TryParseHmsToSeconds(_addActualHms, out var seconds) || seconds <= 0)
+        if (!TryParseHmsToSeconds(_addActualHms, out var seconds))
         {
             _addMessage = "Enter an actual time in HH:MM:SS first (e.g. 00:42:15).";
             return;
@@ -262,10 +269,8 @@ else
         _saving = true;
         try
         {
-            // We can't reliably detect "existing row without actual" from _rows (because _rows only shows actuals).
-            // If you have a service method to look up an EventRunnerTimeId by (runnerId, raceEventId), use it here.
-            // For now we update if the runner is already in the displayed list; otherwise we create.
-            var existingDisplayed = _rows.FirstOrDefault(r => r.Dto.RunnerId == _addRunnerId.Value)?.Dto;
+            // ✅ FIX: check existence against ALL results, not just displayed (_rows shows actuals only)
+            var existing = _page.Results?.FirstOrDefault(r => r.RunnerId == _addRunnerId.Value);
 
             var dto = new EventRunnerTimeUpsertDto
             {
@@ -274,18 +279,18 @@ else
                 Date = _page.Date,
                 Active = true,
 
-                // Predicted optional; keep if we already know it, otherwise leave null (or 0 if your DTO requires int)
-                TargetSeconds = existingDisplayed?.TargetSeconds,
+                // Predicted optional; keep if we already know it, otherwise leave null
+                TargetSeconds = existing?.TargetSeconds,
                 ActualSeconds = seconds
             };
 
             bool ok;
 
-            if (existingDisplayed is not null && existingDisplayed.EventRunnerTimeId > 0)
+            if (existing is not null && existing.EventRunnerTimeId > 0)
             {
                 ok = await RunnerService.UpdateEventRunnerActualAsync(
-                    runnerId: existingDisplayed.RunnerId,
-                    eventRunnerTimeId: existingDisplayed.EventRunnerTimeId,
+                    runnerId: existing.RunnerId,
+                    eventRunnerTimeId: existing.EventRunnerTimeId,
                     dto: dto);
             }
             else
@@ -310,7 +315,7 @@ else
         _saveMessage = null;
         _addMessage = null;
 
-        if (!TryParseHmsToSeconds(editHms, out var seconds) || seconds <= 0)
+        if (!TryParseHmsToSeconds(editHms, out var seconds) )
         {
             _saveMessage = "Please enter an actual time in HH:MM:SS (e.g. 00:42:15).";
             return;
@@ -326,7 +331,6 @@ else
                 Date = _page.Date,
                 Active = true,
 
-                // keep predicted/target unchanged here
                 TargetSeconds = row.TargetSeconds,
                 ActualSeconds = seconds
             };
@@ -346,9 +350,6 @@ else
         }
     }
 
-    /// <summary>
-    /// ✅ FIX: accept both "HH:MM:SS" and "HHh:MMm:SSs"
-    /// </summary>
     private static bool TryParseHmsToSeconds(string? input, out int seconds)
     {
         seconds = 0;
@@ -379,10 +380,6 @@ else
         return $"{(int)ts.TotalHours:00}:{ts.Minutes:00}:{ts.Seconds:00}";
     }
 
-    /// <summary>
-    /// Converts your DTO format "01h:11m:22s" into "01:11:22" for editing.
-    /// If it's already "HH:MM:SS", it remains valid.
-    /// </summary>
     private static string ToColonHms(string? time)
     {
         if (string.IsNullOrWhiteSpace(time)) return "";
