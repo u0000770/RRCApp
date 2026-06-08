@@ -1,0 +1,279 @@
+﻿@page "/admin/league-summary"
+@rendermode InteractiveServer
+@using RRCServices
+@using RRCServices.League.DTO
+@using RRCServices.League.DTO.RRCServices.League.Admin
+@using RRCServices.RRCServices.League.Admin
+@inject IRunnerLeagueSummaryService SummaryService
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">League Summary</h3>
+</div>
+
+@* Season date range controls *@
+<div class="row mb-3">
+    <div class="col-md-3">
+        <label class="form-label">Season Start</label>
+        <input type="date"
+               class="form-control"
+               @bind="_seasonStart"
+               @bind:after="ReloadAsync" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Season End</label>
+        <input type="date"
+               class="form-control"
+               @bind="_seasonEnd"
+               @bind:after="ReloadAsync" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Filter by trophy</label>
+        <select class="form-select"
+                @bind="_trophyFilter"
+                @bind:after="ApplyFilter">
+            <option value="">All</option>
+            <option value="JR">JR Trophy</option>
+            <option value="DB">DB Trophy</option>
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Search name</label>
+        <input class="form-control"
+               placeholder="Runner name…"
+               @bind="_search"
+               @bind:after="ApplyFilter" />
+    </div>
+</div>
+
+@if (_loading)
+{
+    <p>Loading…</p>
+}
+else if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_rows is null || _rows.Count == 0)
+{
+    <p class="text-muted">No runners found.</p>
+}
+else
+{
+    <p class="text-muted small mb-2">Showing @_rows.Count runner(s)</p>
+
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="cursor:pointer" @onclick='() => SortBy("Name")'>
+                        Runner @SortIndicator("Name")
+                    </th>
+                    <th style="cursor:pointer; text-align:center"
+                        @onclick='() => SortBy("TotalRaces")'>
+                        Races @SortIndicator("TotalRaces")
+                    </th>
+
+                    @* JR columns *@
+                    <th colspan="2" class="text-center table-info">JR Trophy</th>
+
+                    @* DB columns *@
+                    <th style="text-align:center" class="table-warning">DB Races</th>
+                    <th colspan="2" class="text-center table-warning">DB Trophy</th>
+
+                    <th style="cursor:pointer; text-align:center"
+                        @onclick='() => SortBy("Assigned")'>
+                        Assigned @SortIndicator("Assigned")
+                    </th>
+                </tr>
+                <tr class="small text-muted">
+                    <th></th>
+                    <th></th>
+                    <th style="cursor:pointer; text-align:center; background-color: var(--bs-info-bg-subtle)"
+                        @onclick='() => SortBy("JrPoints")'>
+                        Pts @SortIndicator("JrPoints")
+                    </th>
+                    <th style="cursor:pointer; text-align:center; background-color: var(--bs-info-bg-subtle)"
+                        @onclick='() => SortBy("JrTimeDiff")'>
+                        TimeDiff @SortIndicator("JrTimeDiff")
+                    </th>
+                    <th style="text-align:center; background-color: var(--bs-warning-bg-subtle)"></th>
+                    <th style="cursor:pointer; text-align:center; background-color: var(--bs-warning-bg-subtle)"
+                        @onclick='() => SortBy("DbPoints")'>
+                        Pts @SortIndicator("DbPoints")
+                    </th>
+                    <th style="cursor:pointer; text-align:center; background-color: var(--bs-warning-bg-subtle)"
+                        @onclick='() => SortBy("DbTimeDiff")'>
+                        TimeDiff @SortIndicator("DbTimeDiff")
+                    </th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _rows)
+                {
+                    <tr>
+                        <td>
+                            <a href="/runners/@r.RunnerId">@r.RunnerName</a>
+                        </td>
+                        <td class="text-center">@r.TotalRaces</td>
+
+                        @* JR *@
+                        <td class="text-center @(r.AssignedTrophy == TrophyType.JR ? "fw-bold" : "text-muted")">
+                            @r.JrPoints
+                        </td>
+                        <td class="text-center @(r.AssignedTrophy == TrophyType.JR ? "fw-bold" : "text-muted")">
+                            @r.JrTimeDiff
+                        </td>
+
+                        @* DB *@
+                        <td class="text-center text-muted">@r.DbRaces</td>
+                        <td class="text-center @(r.AssignedTrophy == TrophyType.DB ? "fw-bold" : "text-muted")">
+                            @r.DbPoints
+                        </td>
+                        <td class="text-center @(r.AssignedTrophy == TrophyType.DB ? "fw-bold" : "text-muted")">
+                            @r.DbTimeDiff
+                        </td>
+
+                        @* Assignment badge *@
+                        <td class="text-center">
+                            @if (r.AssignedTrophy == TrophyType.JR)
+                            {
+                                <span class="badge bg-info text-dark">JR</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-warning text-dark">DB</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    // Season window — defaults to current calendar year
+    private DateTime _seasonStart = new DateTime(DateTime.Today.Year, 1, 1);
+    private DateTime _seasonEnd = new DateTime(DateTime.Today.Year, 12, 31);
+
+    // Filter / search
+    private string _search = "";
+    private string _trophyFilter = "";   // "" | "JR" | "DB"
+
+    // Sort
+    private string _sortColumn = "Name";
+    private bool _sortAscending = true;
+
+    // Data
+    private IReadOnlyList<RunnerLeagueSummaryDto>? _allRows;  // raw from service
+    private List<RunnerLeagueSummaryDto>? _rows;     // after filter + sort
+
+    private bool _loading = true;
+    private string? _error;
+
+    // -----------------------------------------------------------------------
+    // Lifecycle
+    // -----------------------------------------------------------------------
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    // -----------------------------------------------------------------------
+    // Data loading — hits the service, called when season dates change
+    // -----------------------------------------------------------------------
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+        _allRows = null;
+        _rows = null;
+        StateHasChanged();
+
+        try
+        {
+            _allRows = await SummaryService.GetSummaryAsync(_seasonStart, _seasonEnd);
+            ApplyFilter();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load league summary: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Filtering and sorting — in memory, no DB hit
+    // -----------------------------------------------------------------------
+
+    private void ApplyFilter()
+    {
+        if (_allRows is null) return;
+
+        IEnumerable<RunnerLeagueSummaryDto> q = _allRows;
+
+        // Trophy filter
+        if (_trophyFilter == "JR")
+            q = q.Where(r => r.AssignedTrophy == TrophyType.JR);
+        else if (_trophyFilter == "DB")
+            q = q.Where(r => r.AssignedTrophy == TrophyType.DB);
+
+        // Name search
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var term = _search.Trim();
+            q = q.Where(r => r.RunnerName.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // Sort
+        q = (_sortColumn, _sortAscending) switch
+        {
+            ("Name", true) => q.OrderBy(r => r.RunnerName),
+            ("Name", false) => q.OrderByDescending(r => r.RunnerName),
+            ("TotalRaces", true) => q.OrderBy(r => r.TotalRaces),
+            ("TotalRaces", false) => q.OrderByDescending(r => r.TotalRaces),
+            ("JrPoints", true) => q.OrderBy(r => r.JrPoints),
+            ("JrPoints", false) => q.OrderByDescending(r => r.JrPoints),
+            ("JrTimeDiff", true) => q.OrderBy(r => r.JrTimeDiff),
+            ("JrTimeDiff", false) => q.OrderByDescending(r => r.JrTimeDiff),
+            ("DbPoints", true) => q.OrderBy(r => r.DbPoints),
+            ("DbPoints", false) => q.OrderByDescending(r => r.DbPoints),
+            ("DbTimeDiff", true) => q.OrderBy(r => r.DbTimeDiff),
+            ("DbTimeDiff", false) => q.OrderByDescending(r => r.DbTimeDiff),
+            ("Assigned", true) => q.OrderBy(r => r.AssignedTrophy),
+            ("Assigned", false) => q.OrderByDescending(r => r.AssignedTrophy),
+            _ => q.OrderBy(r => r.RunnerName)
+        };
+
+        _rows = q.ToList();
+    }
+
+    // -----------------------------------------------------------------------
+    // Sort helpers — same pattern as Runners.razor
+    // -----------------------------------------------------------------------
+
+    private void SortBy(string column)
+    {
+        if (_sortColumn == column)
+            _sortAscending = !_sortAscending;
+        else
+        {
+            _sortColumn = column;
+            _sortAscending = true;
+        }
+
+        ApplyFilter();
+    }
+
+    private string SortIndicator(string column)
+    {
+        if (_sortColumn != column) return "";
+        return _sortAscending ? "▲" : "▼";
+    }
+}

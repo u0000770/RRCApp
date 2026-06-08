@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MobApp", "..\MobApp\MobApp.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RRCServiceTest", "..\RRCServiceTest\RRCServiceTest.csproj", "{93147474-26D8-4186-80FC-2821B320849D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "testCalc", "..\testCalc\testCalc.csproj", "{422F2390-4C75-4C51-BE08-404B2483598C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -63,6 +65,10 @@ Global
 		{93147474-26D8-4186-80FC-2821B320849D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{93147474-26D8-4186-80FC-2821B320849D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{93147474-26D8-4186-80FC-2821B320849D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{422F2390-4C75-4C51-BE08-404B2483598C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{422F2390-4C75-4C51-BE08-404B2483598C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{422F2390-4C75-4C51-BE08-404B2483598C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{422F2390-4C75-4C51-BE08-404B2483598C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

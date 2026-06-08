@@ -221,28 +221,35 @@ namespace RRCApp.Components.Pages
         // You asked for "empty event handlers" — this is a stub you can fill in later.
         private async Task SaveDetailsEditsAsync()
         {
-            // TODO: Implement save logic later
-            // - Update RaceEvent.Date via Service.UpdateDateAsync(new RaceEventUpdateDTO { RaceEventId = ..., Date = ... })
-            // - Update Event.Title via an EventService method you add later (since title belongs to Events template)
+            _detailsError = null;
 
-            // Example parsing for DateOnly:
+            // Validate date input
             if (!DateOnly.TryParse(_editDetailsDateText, out var parsedDate))
             {
                 _detailsError = "Invalid date format. Use YYYY-MM-DD.";
                 return;
             }
 
-            // Example call (commented out until you implement it):
-            // await Service.UpdateDateAsync(new RaceEventUpdateDTO { RaceEventId = _editDetailsModel.RaceEventId, Date = parsedDate });
+            try
+            {
+                // Update the RaceEvent date
+                // RaceEventUpdateDTO.Date is DateTime, so convert DateOnly → DateTime
+                await Service.UpdateDateAsync(new RaceEventUpdateDTO
+                {
+                    RaceEventId = _editDetailsModel.RaceEventId,
+                    Date = parsedDate.ToDateTime(TimeOnly.MinValue)   // DateOnly → DateTime (midnight)
+                });
 
-            // Example event title update (future):
-            // await EventsService.UpdateTitleAsync(_editDetailsModel.EventId, _editDetailsModel.EventTitle);
+                // Exit edit mode
+                _isEditingDetails = false;
 
-            // For now, just exit edit mode (you can remove this once you wire real updates)
-            _isEditingDetails = false;
-
-            // Optional: reload details after saving
-            // await ShowDetailsAsync(_editDetailsModel.RaceEventId);
+                // Reload details to reflect saved changes in the view
+                await ShowDetailsAsync(_editDetailsModel.RaceEventId);
+            }
+            catch (Exception ex)
+            {
+                _detailsError = $"Save failed: {ex.Message}";
+            }
         }
 
         // A tiny edit model for the details edit panel

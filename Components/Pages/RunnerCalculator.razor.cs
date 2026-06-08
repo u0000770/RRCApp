@@ -461,8 +461,8 @@ namespace RRCApp.Components.Pages
             // SeasonDates settings. Previously there was no season boundary
             // in the admin calculator at all.
             var season = await SeasonSettingsService.GetAsync();
-            _seasonStart = season.SeasonStartDate.ToDateTime(TimeOnly.MinValue);
-
+            // _seasonStart = season.SeasonStartDate.ToDateTime(TimeOnly.MinValue);
+            _seasonStart = new DateTime(2025, 12, 1);
             _runner = await RunnerService.GetRunnerDetailsAsync(runnerId, includeInactiveTimes: false);
 
             await LoadRaceEventsAroundToday();
