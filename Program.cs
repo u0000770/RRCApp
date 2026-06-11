@@ -7,7 +7,7 @@ using RRCServices.Calculator;
 using RRCServices.Calculator.RRCServices;
 using RRCServices.Clock;
 using RRCServices.League;
-using RRCServices.League.RRCServices.League.Admin;
+using RRCServices.League.Admin;
 using RRCServices.RRCServices.League.Admin;
 using RRCServices.Runner;
 using RRCServices.Season;
@@ -56,7 +56,7 @@ namespace RRCApp
             builder.Services.AddScoped<IRacePredictionService, RacePredictionService>();
             builder.Services.AddScoped<IRunnerLeagueSummaryService, RunnerLeagueSummaryService>();
 
-            builder.Services.AddScoped<ILeagueDataService, LeagueDataService>();
+           // builder.Services.AddScoped<ILeagueDataService, LeagueDataService>();
 
 
             builder.Services.AddScoped<IClock, SystemClock>();
