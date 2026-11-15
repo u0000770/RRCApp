@@ -1,0 +1,241 @@
+--- a/rrcapi/Program.cs
++++ b/rrcapi/Program.cs
+@@ -216,6 +216,42 @@
+     .RequireRateLimiting("public")
+     .WithOpenApi();
+ 
++// --------------------
++// Seasons (SEASON WORK, batch 4)
++// --------------------
++// Lets MobApp (and any future client) read the seasons from config.Season
++// instead of hard-coding dates. A season is StartDate..EndDate inclusive.
++
++// GET /api/v1/seasons  — all seasons, newest first
++v1.MapGet("/seasons",
++    async (ISeasonService seasons, CancellationToken ct) =>
++    {
++        var list = await seasons.ListAsync(ct);
++        return Results.Ok(list.Select(ToSeasonDto).ToList());
++    })
++    .RequireRateLimiting("public")
++    .WithOpenApi();
++
++// GET /api/v1/seasons/effective?date=2026-11-20
++// The season whose races are used to predict a race on `date`: the season
++// containing it or, between seasons (the special November race), the one that
++// has just ended. `date` defaults to today. 404 if before the first season.
++v1.MapGet("/seasons/effective",
++    async (DateOnly? date, ISeasonService seasons, IClock clock, CancellationToken ct) =>
++    {
++        var d = date ?? clock.Today;
++        var season = await seasons.GetEffectiveAsync(d, ct);
++
++        return season is null
++            ? Results.NotFound(new ApiErrorDto($"No season covers {d:yyyy-MM-dd}.", "NOT_FOUND"))
++            : Results.Ok(ToSeasonDto(season));
++    })
++    .RequireRateLimiting("public")
++    .WithOpenApi();
++
++static SeasonDto ToSeasonDto(SeasonInfo s)
++    => new(s.SeasonId, s.Name, s.StartDate, s.EndDate, s.AllowNoTarget);
++
+ app.Run();
+ 
+ 
+@@ -233,6 +269,15 @@
+ 
+ public record RunnerLookupResponseDto(int? runnerId);
+ 
++// SEASON WORK (batch 4): JSON shape matches rrc.contracts.SeasonDto
++// (seasonId, name, startDate, endDate, allowNoTarget).
++public record SeasonDto(
++    int seasonId,
++    string name,
++    DateOnly startDate,
++    DateOnly endDate,
++    bool allowNoTarget);
++
+ public sealed class SystemClock : IClock
+ {
+     public DateTime Now => DateTime.Now;
+--- a/rrc.contracts/DTOs.cs
++++ b/rrc.contracts/DTOs.cs
+@@ -230,6 +230,36 @@
+             [JsonPropertyName("timeDiffSeconds")]
+             public int? TimeDiffSeconds { get; init; }
+         }
++
++        // --------------------------------------------
++        // 4.5 Seasons (SEASON WORK, batch 4)
++        // GET /api/v1/seasons
++        // GET /api/v1/seasons/effective?date=yyyy-MM-dd
++        // --------------------------------------------
++        // A season runs StartDate..EndDate inclusive (normally 01 Jan .. 31 Oct).
++        // "effective" = the season containing the date or, between seasons
++        // (the special November race), the season that has just ended. That is
++        // the season whose races are used to predict a race on that date.
++        public sealed class SeasonDto
++        {
++            [JsonPropertyName("seasonId")]
++            public int SeasonId { get; init; }
++
++            [JsonPropertyName("name")]
++            public string Name { get; init; } = "";
++
++            /// <summary>First day of the season (inclusive).</summary>
++            [JsonPropertyName("startDate")]
++            public DateOnly StartDate { get; init; }
++
++            /// <summary>Last day of the season (inclusive).</summary>
++            [JsonPropertyName("endDate")]
++            public DateOnly EndDate { get; init; }
++
++            /// <summary>No-target rule: a race with no target scores a flat 6 points.</summary>
++            [JsonPropertyName("allowNoTarget")]
++            public bool AllowNoTarget { get; init; }
++        }
+     }
+ 
+ 
+--- a/MobApp/ApiClient/RaceApi.cs
++++ b/MobApp/ApiClient/RaceApi.cs
+@@ -94,5 +94,29 @@
+ 
+         return await resp.Content.ReadFromJsonAsync<RunnerDetailsDto>(cancellationToken: ct);
+     }
++
++    // ============================================================
++    // SEASONS (SEASON WORK, batch 4)
++    // GET /api/v1/seasons/effective?date=yyyy-MM-dd
++    // ============================================================
++    // The season whose races are used to predict a race on `date`: the season
++    // containing it or, between seasons (the special November race), the one
++    // that has just ended. Null if no season covers the date (404).
++    public async Task<SeasonDto?> GetEffectiveSeasonAsync(
++        DateOnly date,
++        CancellationToken ct = default)
++    {
++        var dateStr = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
++        var url = $"/api/v1/seasons/effective?date={Uri.EscapeDataString(dateStr)}";
++
++        using var resp = await _http.GetAsync(url, ct);
++
++        if (resp.StatusCode == HttpStatusCode.NotFound)
++            return null;
++
++        resp.EnsureSuccessStatusCode();
++
++        return await resp.Content.ReadFromJsonAsync<SeasonDto>(cancellationToken: ct);
++    }
+ }
+ 
+--- a/MobApp/Pages/MyDetails.razor
++++ b/MobApp/Pages/MyDetails.razor
+@@ -197,9 +197,18 @@
+     private bool _loading = true;
+ 
+     // Use DateOnly for season boundary in client
+-    private DateOnly _seasonStart = new(2025, 12, 1);
++    // SEASON WORK (batch 4): no longer hard-coded (was new(2025, 12, 1)).
++    // Set by ApplySeasonForSelectedRaceAsync() from the API's effective season
++    // for the SELECTED race's date. MaxValue = no season, so no race qualifies.
++    // ❌ OLD: private DateOnly _seasonStart = new(2025, 12, 1);
++    private DateOnly _seasonStart = DateOnly.MaxValue;
+     private bool _hasSeasonRaces;
+ 
++    // SEASON WORK (batch 4): season for the selected race, plus a small cache so
++    // switching between races does not call the API again for the same date.
++    private SeasonDto? _season;
++    private readonly Dictionary<DateOnly, SeasonDto?> _seasonCache = new();
++
+     private RunnerDetailsDto? _runner;
+     private List<RaceEventListItemDto> _races = new();
+ 
+@@ -335,14 +344,9 @@
+             return;
+         }
+ 
+-        // 2) Determine if runner has any eligible in-season races
+-        var seasonStartDt = _seasonStart.ToDateTime(TimeOnly.MinValue);
+-        _hasSeasonRaces = _runner.EventTimes.Any(t =>
+-            t.RaceDate.HasValue &&
+-            t.RaceDate.Value.LocalDateTime >= seasonStartDt &&
+-            t.ActualSeconds.HasValue && t.ActualSeconds.Value > 0 &&
+-            t.DistanceMeters.HasValue && t.DistanceMeters.Value > 0 &&
+-            !IsOneMile(t.DistanceMeters.Value));
++        // 2) SEASON WORK (batch 4): "has eligible in-season races" now depends on
++        //    the selected race's season, so it moved to
++        //    ApplySeasonForSelectedRaceAsync(), called after a race is selected.
+ 
+         // 3) Load upcoming races (next 3 months)
+         var from = DateOnly.FromDateTime(DateTime.Today);
+@@ -361,11 +365,53 @@
+ 
+         _selectedRaceEventId = _races.FirstOrDefault()?.RaceEventId;
+ 
++        await ApplySeasonForSelectedRaceAsync(); // SEASON WORK (batch 4)
+         Calculate(); // initial prediction
+         _loading = false;
+     }
+ 
+-    private void OnSelectedRaceChanged() => Calculate();
++    // SEASON WORK (batch 4): async so the season for the newly selected race can
++    // be fetched first (@bind:after accepts a Task-returning method).
++    // ❌ OLD: private void OnSelectedRaceChanged() => Calculate();
++    private async Task OnSelectedRaceChanged()
++    {
++        await ApplySeasonForSelectedRaceAsync();
++        Calculate();
++    }
++
++    // -----------------------------
++    // SEASON WORK (batch 4): season for the selected race
++    // -----------------------------
++    // Asks the API for the effective season of the selected race's date (or of
++    // today, if no race is selected): the season containing it or, between
++    // seasons (the special November race), the season that has just ended.
++    // Then sets _seasonStart and _hasSeasonRaces from it. Same rule as the web
++    // apps, which use ISeasonService directly.
++    private async Task ApplySeasonForSelectedRaceAsync()
++    {
++        var date = SelectedRaceEvent is null
++            ? DateOnly.FromDateTime(DateTime.Today)
++            : DateOnly.FromDateTime(SelectedRaceEvent.Date.Date);
++
++        if (!_seasonCache.TryGetValue(date, out _season))
++        {
++            _season = await Api.GetEffectiveSeasonAsync(date);
++            _seasonCache[date] = _season;
++        }
++
++        _seasonStart = _season?.StartDate ?? DateOnly.MaxValue;
++
++        // Same test as before, now against the selected race's season.
++        var seasonStartDt = _seasonStart.ToDateTime(TimeOnly.MinValue);
++        _hasSeasonRaces = _runner is not null
++            && _season is not null
++            && _runner.EventTimes.Any(t =>
++                t.RaceDate.HasValue &&
++                t.RaceDate.Value.LocalDateTime >= seasonStartDt &&
++                t.ActualSeconds.HasValue && t.ActualSeconds.Value > 0 &&
++                t.DistanceMeters.HasValue && t.DistanceMeters.Value > 0 &&
++                !IsOneMile(t.DistanceMeters.Value));
++    }
+ 
+     // -----------------------------
+     // Prediction (client-side using Calculator lib)
+@@ -381,6 +427,13 @@
+             return;
+         }
+ 
++        // SEASON WORK (batch 4)
++        if (_season is null)
++        {
++            _calcMessage = "We can’t provide a predicted time for this race — no season has been set up for it yet.";
++            return;
++        }
++
+         if (!_hasSeasonRaces)
+         {
+             _calcMessage = $"We can’t provide a predicted time yet — please run at least one race this season (from {_seasonStart:dd MMM yyyy}).";

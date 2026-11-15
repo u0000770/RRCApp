@@ -1,0 +1,468 @@
+--- a/RRCApp/Components/_Imports.razor
++++ b/RRCApp/Components/_Imports.razor
+@@ -9,6 +9,8 @@
+ @using RRCApp
+ @using RRCApp.Components.Pages
+ @using RRCServices
+-@using Season
++@* SEASON WORK (batch 5): was "@using Season", which pointed at the RRCApp.Season
++   folder (old JSON settings store) that this batch deletes. *@
++@using RRCServices.Season
+ 
+ 
+--- a/RRCApp/Components/Pages/SeasonDates.razor
++++ b/RRCApp/Components/Pages/SeasonDates.razor
+@@ -1,8 +1,26 @@
+ @page "/admin/season-settings"
++@rendermode InteractiveServer
+ @using RRCServices.Season
+-@inject ISeasonSettingsService SeasonSettingsService
++@inject ISeasonService SeasonService
+ 
+-<h3>Season Settings</h3>
++@* =============================================================================
++   SEASON WORK (batch 5): rewritten. Was a form for the four dates in the old
++   JSON settings file (ISeasonSettingsService). Now lists the seasons in
++   config.Season and lets an admin add or edit one via ISeasonService.SaveAsync,
++   which rejects overlapping seasons and duplicate names. Changes are seen by
++   RRCApp, PublicApp, rrcapi and MobApp straight away.
++   ============================================================================= *@
++
++<PageTitle>Seasons</PageTitle>
++
++<h3>Seasons</h3>
++
++<p class="text-muted">
++    A season runs from its start date to its end date, both included (normally 1 Jan – 31 Oct).
++    Dates between seasons, such as the special November race, belong to no season: they are never
++    scored in the league and are predicted from the season that has just ended.
++    Changes here apply to every app straight away.
++</p>
+ 
+ @if (_loading)
+ {
+@@ -10,52 +28,122 @@
+ }
+ else
+ {
+-    <EditForm Model="_model"
+-              OnValidSubmit="SaveAsync"
+-              FormName="SeasonSettingsForm">
+-
+-        <DataAnnotationsValidator />
+-        <ValidationSummary />
+-
+-        <div class="mb-3">
+-            <label class="form-label">Season Start</label>
+-            <InputDate TValue="DateOnly"
+-                       class="form-control"
+-                       @bind-Value="_model.SeasonStartDate" />
++    @if (!string.IsNullOrWhiteSpace(_loadError))
++    {
++        <div class="alert alert-danger">@_loadError</div>
++    }
++
++    <table class="table table-sm align-middle">
++        <thead>
++            <tr>
++                <th>Season</th>
++                <th>Start</th>
++                <th>End</th>
++                <th>No-target rule</th>
++                <th></th>
++            </tr>
++        </thead>
++        <tbody>
++            @if (_seasons.Count == 0)
++            {
++                <tr><td colspan="5" class="text-muted">No seasons set up yet.</td></tr>
++            }
++            @foreach (var s in _seasons)
++            {
++                var isCurrent = _current is not null && s.SeasonId == _current.SeasonId;
++                <tr class="@(isCurrent ? "table-primary" : null)">
++                    <td>
++                        @s.Name
++                        @if (isCurrent)
++                        {
++                            <span class="badge bg-primary ms-1">current</span>
++                        }
++                    </td>
++                    <td>@s.StartDate.ToString("dd MMM yyyy")</td>
++                    <td>@s.EndDate.ToString("dd MMM yyyy")</td>
++                    <td>@(s.AllowNoTarget ? "On (no target = 6 points)" : "Off")</td>
++                    <td class="text-end">
++                        <button class="btn btn-sm btn-outline-primary"
++                                @onclick="() => StartEdit(s)"
++                                disabled="@(_edit is not null)">
++                            Edit
++                        </button>
++                    </td>
++                </tr>
++            }
++        </tbody>
++    </table>
++
++    @if (_edit is null)
++    {
++        <button class="btn btn-primary" @onclick="StartAdd">Add season</button>
++    }
++    else
++    {
++        <div class="card mt-3">
++            <div class="card-body">
++                <h5 class="card-title">@(_edit.SeasonId == 0 ? "Add season" : $"Edit season {_edit.Name}")</h5>
++
++                @if (_edit.SeasonId != 0)
++                {
++                    <div class="alert alert-warning py-2">
++                        Changing the dates of a season that already has results changes its league
++                        tables and predictions straight away.
++                    </div>
++                }
++
++                <EditForm Model="_edit" OnValidSubmit="SaveAsync" FormName="SeasonEditForm">
++
++                    <div class="row g-3">
++                        <div class="col-md-3">
++                            <label class="form-label">Name</label>
++                            <InputText class="form-control" @bind-Value="_edit.Name" />
++                        </div>
++                        <div class="col-md-3">
++                            <label class="form-label">Start (first day)</label>
++                            <InputDate TValue="DateOnly" class="form-control" @bind-Value="_edit.StartDate" />
++                        </div>
++                        <div class="col-md-3">
++                            <label class="form-label">End (last day)</label>
++                            <InputDate TValue="DateOnly" class="form-control" @bind-Value="_edit.EndDate" />
++                        </div>
++                        <div class="col-md-3 d-flex align-items-end">
++                            <div class="form-check mb-2">
++                                <InputCheckbox class="form-check-input" id="allowNoTarget" @bind-Value="_edit.AllowNoTarget" />
++                                <label class="form-check-label" for="allowNoTarget">
++                                    No-target rule (no target = 6 points)
++                                </label>
++                            </div>
++                        </div>
++                    </div>
++
++                    @if (_errors.Count > 0)
++                    {
++                        <div class="alert alert-danger mt-3 mb-0">
++                            <ul class="mb-0">
++                                @foreach (var e in _errors)
++                                {
++                                    <li>@e</li>
++                                }
++                            </ul>
++                        </div>
++                    }
++
++                    <div class="mt-3 d-flex gap-2">
++                        <button class="btn btn-primary" type="submit" disabled="@_saving">
++                            @(_saving ? "Saving…" : "Save")
++                        </button>
++                        <button class="btn btn-outline-secondary" type="button" @onclick="CancelEdit" disabled="@_saving">
++                            Cancel
++                        </button>
++                    </div>
++                </EditForm>
++            </div>
+         </div>
++    }
+ 
+-        <div class="mb-3">
+-            <label class="form-label">Season End</label>
+-            <InputDate TValue="DateOnly"
+-                       class="form-control"
+-                       @bind-Value="_model.SeasonEndDate" />
+-        </div>
+-
+-        <div class="mb-3">
+-            <label class="form-label">Selection Start</label>
+-            <InputDate TValue="DateOnly"
+-                       class="form-control"
+-                       @bind-Value="_model.SelectionStartDate" />
+-        </div>
+-
+-        <div class="mb-3">
+-            <label class="form-label">Selection End</label>
+-            <InputDate TValue="DateOnly"
+-                       class="form-control"
+-                       @bind-Value="_model.SelectionEndDate" />
+-        </div>
+-
+-        <button class="btn btn-primary" type="submit">Save</button>
+-
+-        @if (!string.IsNullOrWhiteSpace(_message))
+-        {
+-            <div class="mt-3 alert alert-info">@_message</div>
+-        }
+-        @if (!string.IsNullOrWhiteSpace(_error))
+-        {
+-            <div class="mt-3 alert alert-danger">@_error</div>
+-        }
+-    </EditForm>
++    @if (!string.IsNullOrWhiteSpace(_message))
++    {
++        <div class="mt-3 alert alert-success">@_message</div>
++    }
+ }
+-
+-
+--- a/RRCApp/Components/Pages/SeasonDates.razor.cs
++++ b/RRCApp/Components/Pages/SeasonDates.razor.cs
+@@ -2,33 +2,115 @@
+ 
+ namespace RRCApp.Components.Pages
+ {
++    // =========================================================================
++    // SeasonDates — admin season list (/admin/season-settings)
++    // =========================================================================
++    // SEASON WORK (batch 5): rewritten for ISeasonService / config.Season.
++    // The old version edited the four dates of the JSON settings file through
++    // ISeasonSettingsService, which no page uses any more and which this batch
++    // deletes.
++    //
++    // Add: pre-fills the year after the newest season (1 Jan – 31 Oct), copying
++    //      that season's no-target setting.
++    // Edit: loads the season into the same form.
++    // Save: ISeasonService.SaveAsync validates (SeasonRules.Validate): name
++    //       required and unique, end on or after start, no overlap with another
++    //       season. Problems are listed under the form.
++    //
++    // There is deliberately no Delete: a season with results would lose its
++    // league and predictions. Correct its dates instead.
++    // =========================================================================
+     public partial class SeasonDates
+     {
+-        private SeasonSettings _model = new();
++        private IReadOnlyList<SeasonInfo> _seasons = Array.Empty<SeasonInfo>();
++        private SeasonInfo? _current;
++
++        private SeasonEdit? _edit;                      // null = form hidden
++        private IReadOnlyList<string> _errors = Array.Empty<string>();
++
+         private bool _loading = true;
++        private bool _saving;
+         private string? _message;
+-        private string? _error;
++        private string? _loadError;
+ 
+         protected override async Task OnInitializedAsync()
+         {
+-            _model = await SeasonSettingsService.GetAsync();
++            await LoadAsync();
+             _loading = false;
+         }
+ 
++        private async Task LoadAsync()
++        {
++            try
++            {
++                _seasons = await SeasonService.ListAsync();          // newest first
++                _current = await SeasonService.GetCurrentAsync();
++                _loadError = null;
++            }
++            catch (Exception ex)
++            {
++                _loadError = $"Could not load seasons: {ex.Message}";
++            }
++        }
++
++        private void StartAdd()
++        {
++            var newest = _seasons.FirstOrDefault();
++            var year = newest is null ? DateTime.Today.Year : newest.StartDate.Year + 1;
++
++            _edit = new SeasonEdit
++            {
++                SeasonId = 0,
++                Name = year.ToString(),
++                StartDate = new DateOnly(year, 1, 1),
++                EndDate = new DateOnly(year, 10, 31),
++                AllowNoTarget = newest?.AllowNoTarget ?? true
++            };
++
++            _errors = Array.Empty<string>();
++            _message = null;
++        }
++
++        private void StartEdit(SeasonInfo season)
++        {
++            _edit = SeasonEdit.From(season);
++            _errors = Array.Empty<string>();
++            _message = null;
++        }
++
++        private void CancelEdit()
++        {
++            _edit = null;
++            _errors = Array.Empty<string>();
++        }
++
+         private async Task SaveAsync()
+         {
++            if (_edit is null) return;
++
++            _saving = true;
++            _errors = Array.Empty<string>();
+             _message = null;
+-            _error = null;
+ 
+             try
+             {
+-                await SeasonSettingsService.UpdateAsync(_model);
+-                _message = "Saved successfully.";
++                var saved = await SeasonService.SaveAsync(_edit);
++                _message = $"Season {saved.Name} saved: {saved.Window}.";
++                _edit = null;
++                await LoadAsync();
++            }
++            catch (SeasonValidationException ex)
++            {
++                _errors = ex.Errors;
+             }
+             catch (Exception ex)
+             {
+-                _error = ex.Message;
++                _errors = new[] { $"Save failed: {ex.Message}" };
++            }
++            finally
++            {
++                _saving = false;
+             }
+         }
+     }
+-}
+\ No newline at end of file
++}
+--- a/RRCApp/Program.cs
++++ b/RRCApp/Program.cs
+@@ -1,6 +1,5 @@
+ using Microsoft.EntityFrameworkCore;
+ using RRCApp.Components;
+-using RRCApp.Season;
+ using RRCConfig.Data;
+ using RRCDataModel.Data;
+ using RRCServices;
+@@ -60,6 +59,8 @@
+            // builder.Services.AddScoped<ILeagueDataService, LeagueDataService>();
+ 
+ 
++            // SEASON WORK (batch 5): SystemClock is now RRCServices.Clock.SystemClock
++            // (UK time). RRCApp's own copy in Class.cs has been deleted.
+             builder.Services.AddScoped<IClock, SystemClock>();
+ 
+             // SEASON WORK (batch 2): seasons live in config.Season in the same
+@@ -73,31 +74,10 @@
+                         errorNumbersToAdd: null)));
+             builder.Services.AddScoped<ISeasonService, SeasonService>();
+ 
+-
+-
+-
+-
+-            builder.Services.Configure<SeasonSettings>(
+-                builder.Configuration.GetSection("SeasonSettings"));
+-
+-            // Defaults live in appsettings.json (WEB APP)
+-            builder.Services.Configure<SeasonSettings>(
+-                builder.Configuration.GetSection("SeasonSettings"));
+-
+-            // Choose a persistence file path (NOT appsettings.json)
+-            // This creates: <contentroot>/App_Data/seasonSettings.json
+-            var seasonSettingsPath = Path.Combine(
+-                builder.Environment.ContentRootPath,
+-                "App_Data",
+-                "seasonSettings.json");
+-
+-            builder.Services.AddSingleton<ISeasonSettingsStore>(
+-                _ => new JsonSeasonSettingsStore(seasonSettingsPath));
+-
+-            // Service can be Singleton because:
+-            // - settings are global
+-            // - it uses a thread-safe store + in-memory cache
+-            builder.Services.AddSingleton<ISeasonSettingsService, SeasonSettingsService>();
++            // SEASON WORK (batch 5): the old JSON season settings registrations
++            // (Configure<SeasonSettings> x2, ISeasonSettingsStore /
++            // JsonSeasonSettingsStore, ISeasonSettingsService) have been removed.
++            // Seasons are now managed on /admin/season-settings via ISeasonService.
+ 
+ 
+ 
+--- a/PublicApp/Program.cs
++++ b/PublicApp/Program.cs
+@@ -46,28 +46,21 @@
+ 
+         builder.Services.AddScoped<IRaceEventService, RaceEventService>();
+         builder.Services.AddScoped<IRunnerService, RunnerService>();
++        // SEASON WORK (batch 5): SystemClock is now RRCServices.Clock.SystemClock
++        // (UK time). PublicApp's own copy in clock.cs has been deleted.
+         builder.Services.AddScoped<IClock, SystemClock>();
+         builder.Services.AddScoped<CalculatorService>();
+         builder.Services.AddScoped<IRaceResultService, RaceResultService>();
+         builder.Services.AddScoped<ITrophyCalculator, TrophyCalculator>();
+         builder.Services.AddSingleton<ITimeFormatter, TimeFormatter>();
+ 
+-        // ✅ Register the settings store (file path wherever you want)
+-        var seasonSettingsPath = Path.Combine(
+-            builder.Environment.ContentRootPath,
+-            "App_Data",
+-            "seasonSettings.json");
+-
+-        // ✅ Store + service registrations (required)
+-        builder.Services.AddSingleton<ISeasonSettingsStore>(_ =>
+-            new JsonSeasonSettingsStore(seasonSettingsPath));
+-
+-        builder.Services.AddSingleton<ISeasonSettingsService, SeasonSettingsService>();
++        // SEASON WORK (batch 5): the old JSON season settings registrations
++        // (ISeasonSettingsStore / JsonSeasonSettingsStore, ISeasonSettingsService)
++        // have been removed.
+ 
+         // SEASON WORK (batch 2): seasons live in config.Season in the same
+         // database, via their own small SeasonContext (RRCConfig project).
+-        // MyDetails and League use it. The JSON settings store above is no
+-        // longer used by any page and is removed in a later batch.
++        // MyDetails and League use it.
+         builder.Services.AddDbContextFactory<SeasonContext>(options =>
+             options.UseSqlServer(cs, sql =>
+                 sql.EnableRetryOnFailure(
+--- a/rrcapi/Program.cs
++++ b/rrcapi/Program.cs
+@@ -104,6 +104,9 @@
+ // registered here, so /api/v1/league/trophy could not be resolved (HTTP 500).
+ builder.Services.AddScoped<ITrophyCalculator, TrophyCalculator>();
+ 
++// SEASON WORK (batch 5): SystemClock is now RRCServices.Clock.SystemClock (UK
++// time, so "today" is right during BST on Azure, which runs in UTC). The copy at
++// the bottom of this file and the one in Class.cs have been deleted.
+ builder.Services.AddSingleton<IClock, SystemClock>();
+ 
+ // SEASON WORK (batch 2+3): LeagueTableService now uses ISeasonService for the
+@@ -278,8 +281,5 @@
+     DateOnly endDate,
+     bool allowNoTarget);
+ 
+-public sealed class SystemClock : IClock
+-{
+-    public DateTime Now => DateTime.Now;
+-    public DateTime UtcNow => DateTime.UtcNow;
+-}
++// SEASON WORK (batch 5): the local SystemClock class that was here has been
++// removed; RRCServices.Clock.SystemClock is used instead (see registration above).
+--- a/RRCServices/Clock/IClock.cs
++++ b/RRCServices/Clock/IClock.cs
+@@ -11,9 +11,9 @@
+     //     server's time zone. Azure App Service runs in UTC, so DateTime.Now
+     //     there is an hour behind during BST.
+     //
+-    // NOTE: this SystemClock isn't used yet. Each host registers its own
+-    // local SystemClock copy, which shadows this one. A later batch deletes
+-    // those copies so all hosts use this one.
++    // SEASON WORK (batch 5): the host copies of SystemClock (RRCApp/Class.cs,
++    // PublicApp/clock.cs, rrcapi/Class.cs and the one in rrcapi/Program.cs)
++    // have been deleted. RRCApp, PublicApp and rrcapi all use this one now.
+     // =========================================================================
+     public interface IClock
+     {

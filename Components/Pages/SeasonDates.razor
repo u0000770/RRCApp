@@ -1,8 +1,26 @@
 ﻿@page "/admin/season-settings"
+@rendermode InteractiveServer
 @using RRCServices.Season
-@inject ISeasonSettingsService SeasonSettingsService
+@inject ISeasonService SeasonService
 
-<h3>Season Settings</h3>
+@* =============================================================================
+   SEASON WORK (batch 5): rewritten. Was a form for the four dates in the old
+   JSON settings file (ISeasonSettingsService). Now lists the seasons in
+   config.Season and lets an admin add or edit one via ISeasonService.SaveAsync,
+   which rejects overlapping seasons and duplicate names. Changes are seen by
+   RRCApp, PublicApp, rrcapi and MobApp straight away.
+   ============================================================================= *@
+
+<PageTitle>Seasons</PageTitle>
+
+<h3>Seasons</h3>
+
+<p class="text-muted">
+    A season runs from its start date to its end date, both included (normally 1 Jan – 31 Oct).
+    Dates between seasons, such as the special November race, belong to no season: they are never
+    scored in the league and are predicted from the season that has just ended.
+    Changes here apply to every app straight away.
+</p>
 
 @if (_loading)
 {
@@ -10,52 +28,122 @@
 }
 else
 {
-    <EditForm Model="_model"
-              OnValidSubmit="SaveAsync"
-              FormName="SeasonSettingsForm">
+    @if (!string.IsNullOrWhiteSpace(_loadError))
+    {
+        <div class="alert alert-danger">@_loadError</div>
+    }
 
-        <DataAnnotationsValidator />
-        <ValidationSummary />
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                <th>Season</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>No-target rule</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (_seasons.Count == 0)
+            {
+                <tr><td colspan="5" class="text-muted">No seasons set up yet.</td></tr>
+            }
+            @foreach (var s in _seasons)
+            {
+                var isCurrent = _current is not null && s.SeasonId == _current.SeasonId;
+                <tr class="@(isCurrent ? "table-primary" : null)">
+                    <td>
+                        @s.Name
+                        @if (isCurrent)
+                        {
+                            <span class="badge bg-primary ms-1">current</span>
+                        }
+                    </td>
+                    <td>@s.StartDate.ToString("dd MMM yyyy")</td>
+                    <td>@s.EndDate.ToString("dd MMM yyyy")</td>
+                    <td>@(s.AllowNoTarget ? "On (no target = 6 points)" : "Off")</td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-primary"
+                                @onclick="() => StartEdit(s)"
+                                disabled="@(_edit is not null)">
+                            Edit
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
 
-        <div class="mb-3">
-            <label class="form-label">Season Start</label>
-            <InputDate TValue="DateOnly"
-                       class="form-control"
-                       @bind-Value="_model.SeasonStartDate" />
+    @if (_edit is null)
+    {
+        <button class="btn btn-primary" @onclick="StartAdd">Add season</button>
+    }
+    else
+    {
+        <div class="card mt-3">
+            <div class="card-body">
+                <h5 class="card-title">@(_edit.SeasonId == 0 ? "Add season" : $"Edit season {_edit.Name}")</h5>
+
+                @if (_edit.SeasonId != 0)
+                {
+                    <div class="alert alert-warning py-2">
+                        Changing the dates of a season that already has results changes its league
+                        tables and predictions straight away.
+                    </div>
+                }
+
+                <EditForm Model="_edit" OnValidSubmit="SaveAsync" FormName="SeasonEditForm">
+
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Name</label>
+                            <InputText class="form-control" @bind-Value="_edit.Name" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Start (first day)</label>
+                            <InputDate TValue="DateOnly" class="form-control" @bind-Value="_edit.StartDate" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">End (last day)</label>
+                            <InputDate TValue="DateOnly" class="form-control" @bind-Value="_edit.EndDate" />
+                        </div>
+                        <div class="col-md-3 d-flex align-items-end">
+                            <div class="form-check mb-2">
+                                <InputCheckbox class="form-check-input" id="allowNoTarget" @bind-Value="_edit.AllowNoTarget" />
+                                <label class="form-check-label" for="allowNoTarget">
+                                    No-target rule (no target = 6 points)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (_errors.Count > 0)
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">
+                            <ul class="mb-0">
+                                @foreach (var e in _errors)
+                                {
+                                    <li>@e</li>
+                                }
+                            </ul>
+                        </div>
+                    }
+
+                    <div class="mt-3 d-flex gap-2">
+                        <button class="btn btn-primary" type="submit" disabled="@_saving">
+                            @(_saving ? "Saving…" : "Save")
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" @onclick="CancelEdit" disabled="@_saving">
+                            Cancel
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
         </div>
+    }
 
-        <div class="mb-3">
-            <label class="form-label">Season End</label>
-            <InputDate TValue="DateOnly"
-                       class="form-control"
-                       @bind-Value="_model.SeasonEndDate" />
-        </div>
-
-        <div class="mb-3">
-            <label class="form-label">Selection Start</label>
-            <InputDate TValue="DateOnly"
-                       class="form-control"
-                       @bind-Value="_model.SelectionStartDate" />
-        </div>
-
-        <div class="mb-3">
-            <label class="form-label">Selection End</label>
-            <InputDate TValue="DateOnly"
-                       class="form-control"
-                       @bind-Value="_model.SelectionEndDate" />
-        </div>
-
-        <button class="btn btn-primary" type="submit">Save</button>
-
-        @if (!string.IsNullOrWhiteSpace(_message))
-        {
-            <div class="mt-3 alert alert-info">@_message</div>
-        }
-        @if (!string.IsNullOrWhiteSpace(_error))
-        {
-            <div class="mt-3 alert alert-danger">@_error</div>
-        }
-    </EditForm>
+    @if (!string.IsNullOrWhiteSpace(_message))
+    {
+        <div class="mt-3 alert alert-success">@_message</div>
+    }
 }
-
-

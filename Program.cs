@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RRCApp.Components;
-using RRCApp.Season;
+using RRCConfig.Data;
 using RRCDataModel.Data;
 using RRCServices;
 using RRCServices.Calculator;
@@ -59,33 +59,25 @@ namespace RRCApp
            // builder.Services.AddScoped<ILeagueDataService, LeagueDataService>();
 
 
+            // SEASON WORK (batch 5): SystemClock is now RRCServices.Clock.SystemClock
+            // (UK time). RRCApp's own copy in Class.cs has been deleted.
             builder.Services.AddScoped<IClock, SystemClock>();
 
+            // SEASON WORK (batch 2): seasons live in config.Season in the same
+            // database, via their own small SeasonContext (RRCConfig project).
+            // RacePredictionService, RunnerCalculator and LeagueSummary use it.
+            builder.Services.AddDbContextFactory<SeasonContext>(options =>
+                options.UseSqlServer(cs, sql =>
+                    sql.EnableRetryOnFailure(
+                        maxRetryCount: 3,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorNumbersToAdd: null)));
+            builder.Services.AddScoped<ISeasonService, SeasonService>();
 
-
-
-
-            builder.Services.Configure<SeasonSettings>(
-                builder.Configuration.GetSection("SeasonSettings"));
-
-            // Defaults live in appsettings.json (WEB APP)
-            builder.Services.Configure<SeasonSettings>(
-                builder.Configuration.GetSection("SeasonSettings"));
-
-            // Choose a persistence file path (NOT appsettings.json)
-            // This creates: <contentroot>/App_Data/seasonSettings.json
-            var seasonSettingsPath = Path.Combine(
-                builder.Environment.ContentRootPath,
-                "App_Data",
-                "seasonSettings.json");
-
-            builder.Services.AddSingleton<ISeasonSettingsStore>(
-                _ => new JsonSeasonSettingsStore(seasonSettingsPath));
-
-            // Service can be Singleton because:
-            // - settings are global
-            // - it uses a thread-safe store + in-memory cache
-            builder.Services.AddSingleton<ISeasonSettingsService, SeasonSettingsService>();
+            // SEASON WORK (batch 5): the old JSON season settings registrations
+            // (Configure<SeasonSettings> x2, ISeasonSettingsStore /
+            // JsonSeasonSettingsStore, ISeasonSettingsService) have been removed.
+            // Seasons are now managed on /admin/season-settings via ISeasonService.
 
 
 

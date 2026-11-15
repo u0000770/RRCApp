@@ -1,0 +1,871 @@
+--- a/RRCServices/Calculator/IRacePredictionService.cs
++++ b/RRCServices/Calculator/IRacePredictionService.cs
+@@ -61,16 +61,17 @@
+         public sealed class RacePredictionService : IRacePredictionService
+         {
+             private readonly IDbContextFactory<RRCContext> _factory;
+-            private readonly ISeasonSettingsService _seasonSettings;
++            // SEASON WORK (batch 2): ISeasonSettingsService -> ISeasonService
++            private readonly ISeasonService _seasons;
+             private readonly CalculatorService _calculator;
+ 
+             public RacePredictionService(
+                 IDbContextFactory<RRCContext> factory,
+-                ISeasonSettingsService seasonSettings,
++                ISeasonService seasons,
+                 CalculatorService calculator)
+             {
+                 _factory = factory;
+-                _seasonSettings = seasonSettings;
++                _seasons = seasons;
+                 _calculator = calculator;
+             }
+ 
+@@ -254,14 +255,13 @@
+                 if (raceEventId <= 0) return new List<RunnerPredictionDto>();
+                 if (lastN <= 0) lastN = 3;
+ 
+-                var season = await _seasonSettings.GetAsync(ct);
+-
+-                // DateOnly -> DateTime (inclusive start)
+-          //      var seasonStart = season.SeasonStartDate.ToDateTime(TimeOnly.MinValue);
+-                 var seasonStart =  new DateTime(2025, 11, 30);
+-                // Optional: inclusive end
+-                //var seasonEnd = season.SeasonEndDate.ToDateTime(TimeOnly.MaxValue);
+-                var seasonEnd =  new DateTime(2026, 11, 30);
++                // SEASON WORK (batch 2): the hard-coded window 2025-11-30 .. 2026-11-30
++                // has been removed. The season is now chosen from the RACE DATE
++                // (see step 1b below), using ISeasonService.GetEffectiveAsync:
++                //   - a race inside a season uses that season's races
++                //   - the special November race (between seasons) uses the
++                //     season that has just ended
++                //   - predictions reset on 01 Jan
+ 
+                 await using var db = await _factory.CreateDbContextAsync(ct);
+ 
+@@ -294,8 +294,20 @@
+ 
+                 var raceDate = race.RaceDate;
+ 
++                // 1b) SEASON WORK (batch 2): season that applies to this race.
++                //     Null only if the race is before the first season in config.Season.
++                var season = await _seasons.GetEffectiveAsync(DateOnly.FromDateTime(raceDate), ct);
++                if (season is null)
++                    return new List<RunnerPredictionDto>();
++
++                // Copied into locals so EF sends them as plain query parameters.
++                // Half-open range [seasonStart, seasonEndExclusive) so races on the
++                // season's last day are included whatever their time of day.
++                var seasonStart = season.Window.FromInclusive;
++                var seasonEndExclusive = season.Window.ToExclusive;
++
+                 // 2) Find eligible active runners:
+-                //    Active == true AND has at least one completed race since seasonStart
++                //    Active == true AND has at least one completed race in the season
+                 var eligibleRunners = await db.runners
+                     .AsNoTracking()
+                     .Where(r => r.Active == true)
+@@ -307,7 +319,7 @@
+                             t.Actual.Value > 0 &&
+                             t.Date.HasValue &&
+                             t.Date.Value >= seasonStart &&
+-                            t.Date.Value <= seasonEnd
++                            t.Date.Value < seasonEndExclusive
+                         )
+                     )
+                     .Select(r => new
+--- a/RRCServices/League/LeagueTableService.cs
++++ b/RRCServices/League/LeagueTableService.cs
+@@ -4,6 +4,7 @@
+ using RRCDataModel.Data;
+ using RRCServices.League.DTO;
+ using RRCServices.League.Trophy;
++using RRCServices.Season;
+ 
+ namespace RRCServices.League
+ {
+@@ -76,12 +77,16 @@
+     //   Miss target time           →   6 points
+     //   Improvement capped at 120 seconds per race for tie-breaking purposes
+     //
+-    // 2026 NO-TARGET RULE:
++    // NO-TARGET RULE (SEASON WORK, batch 2+3 — was the "2026 NO-TARGET RULE"):
+     //   If a runner has a valid actual time but no predicted time, and the race
+-    //   is in 2026, they are awarded a flat 6 points with 0 time difference.
++    //   falls in a season whose AllowNoTarget flag is on (config.Season), they
++    //   are awarded a flat 6 points with 0 time difference. Was hard-coded to
++    //   race year 2026; now 2026 and 2027 are on, 2025 is off.
+     //   This applies to both JR and DB trophies.
+     //   Races without a target are included in the top-N selection but rank at
+     //   the bottom (ImprovementSeconds returns 0 for them in LeagueRaceDto).
++    //   Which no-target races may score is decided ONCE, in ApplyNoTargetRule,
++    //   used by this service and by RunnerLeagueSummaryService.
+     //
+     // ASSIGNMENT RULE (see TrophyAssignmentResolver):
+     //   JR is only open to runners who have run a race longer than 10k. Each runner
+@@ -102,10 +107,13 @@
+         // LeagueTableService logic from TrophyCalculator logic.
+         // IMPORTANT: all points/trophy-time arithmetic lives in TrophyCalculator.
+         //            Do not add scoring logic here — this service only orchestrates.
+-        //            Exception: the 2026 no-target rule is intercepted in ScoreRunner
++        //            Exception: the no-target rule is intercepted in ScoreRunner
+         //            before the calculator is called, as there is no target to calculate with.
+         private readonly ITrophyCalculator _calculator;
+ 
++        // SEASON WORK (batch 2+3): seasons decide which no-target races may score.
++        private readonly ISeasonService _seasons;
++
+         // The set of distance codes that qualify a race for the DB Trophy.
+         // Stored as a HashSet for O(1) lookups. OrdinalIgnoreCase means "10KM"
+         // and "10km" are treated as the same code, guarding against data-entry
+@@ -140,10 +148,32 @@
+         // -------------------------------------------------------------------------
+         public LeagueTableService(
+             IDbContextFactory<RRCContext> factory,
+-            ITrophyCalculator calculator)
++            ITrophyCalculator calculator,
++            ISeasonService seasons)
+         {
+             _factory = factory;
+             _calculator = calculator;
++            _seasons = seasons;
++        }
++
++        // =========================================================================
++        // ApplyNoTargetRule — SEASON WORK (batch 2+3)
++        // =========================================================================
++        // Keeps every race that has a target, and keeps a NO-TARGET race only if
++        // its date falls in a season with AllowNoTarget on (SeasonRules rule 6).
++        // Replaces "t.Date.Value.Year == 2026" in the EF queries of this service
++        // and RunnerLeagueSummaryService, so both apply the identical rule.
++        //
++        // Internal static (like ScoreRunner) so it can be unit tested directly.
++        // =========================================================================
++        internal static List<LeagueRaceDto> ApplyNoTargetRule(
++            List<LeagueRaceDto> races,
++            IReadOnlyList<SeasonInfo> seasons)
++        {
++            return races
++                .Where(r => r.HasTarget
++                         || SeasonRules.AllowsNoTarget(seasons, DateOnly.FromDateTime(r.RaceDate)))
++                .ToList();
+         }
+ 
+ 
+@@ -172,8 +202,9 @@
+             //   - The EventRunnerTime record is active
+             //   - The race has a valid actual time AND either:
+             //       a) a valid predicted time (normal path), OR
+-            //       b) the race is in 2026 and has no predicted time
+-            //          (2026 no-target rule — awarded flat 6 points in ScoreRunner)
++            //       b) no predicted time, in a season with AllowNoTarget on
++            //          (no-target rule — flat 6 points in ScoreRunner; filtered
++            //          by ApplyNoTargetRule after the query)
+             //   - The race date falls within the season window (inclusive)
+             //
+             // We join three tables here: EventRunnerTimes (the results), runners
+@@ -194,14 +225,11 @@
+                       && t.Date.Value <= seasonEnd
+                       && t.Actual.HasValue && t.Actual.Value > 0   // must have a real finish time
+ 
+-                      // 2026 NO-TARGET RULE: allow rows where target is missing/zero
+-                      // provided the race falls in 2026. All other years still require
+-                      // a valid target time as before.
+-                      // ❌ OLD: && t.Target.HasValue && t.Target.Value > 0
+-                      && (
+-                            (t.Target.HasValue && t.Target.Value > 0) ||
+-                            t.Date.Value.Year == 2026
+-                         )
++                      // NO-TARGET RULE (SEASON WORK, batch 2+3): rows with no target are
++                      // now loaded too, and filtered just below by ApplyNoTargetRule
++                      // using the season's AllowNoTarget flag.
++                      // ❌ OLD: && ((t.Target.HasValue && t.Target.Value > 0) ||
++                      //            t.Date.Value.Year == 2026)
+ 
+                 select new LeagueRaceDto
+                 {
+@@ -212,7 +240,7 @@
+                     DistanceCode = e.DistanceCode,
+                     RaceTitle = e.Title,
+ 
+-                    // 2026 NO-TARGET RULE: target defaults to 0 when not set.
++                    // NO-TARGET RULE: target defaults to 0 when not set.
+                     // HasTarget drives the scoring decision in ScoreRunner —
+                     // TargetSeconds is never used directly for a no-target race.
+                     // ❌ OLD: TargetSeconds = t.Target.Value,
+@@ -220,12 +248,17 @@
+ 
+                     ActualSeconds = t.Actual!.Value,
+ 
+-                    // 2026 NO-TARGET RULE: true = normal scoring path via TrophyCalculator.
+-                    //                      false = flat 6 points awarded in ScoreRunner.
++                    // NO-TARGET RULE: true = normal scoring path via TrophyCalculator.
++                    //                 false = flat 6 points awarded in ScoreRunner.
+                     HasTarget = t.Target.HasValue && t.Target.Value > 0
+                 }
+             ).ToListAsync(ct);
+ 
++            // NO-TARGET RULE (SEASON WORK, batch 2+3): drop no-target races
++            // unless their season allows them (replaces Year == 2026).
++            IReadOnlyList<SeasonInfo> seasons = await _seasons.ListAsync(ct);
++            races = ApplyNoTargetRule(races, seasons);
++
+             // -----------------------------------------------------------------
+             // STEP 2: Group the flat list of races by runner.
+             // -----------------------------------------------------------------
+@@ -486,10 +519,15 @@
+ 
+             foreach (LeagueRaceDto r in top)
+             {
+-                // 2026 NO-TARGET RULE: if the race has no predicted time and is in
+-                // 2026, award a flat 6 points with no time difference contribution.
++                // NO-TARGET RULE: if the race has no predicted time, award a flat
++                // 6 points with no time difference contribution.
+                 // TrophyCalculator is bypassed entirely — there is no target to score against.
+-                if (!r.HasTarget && r.RaceDate.Year == 2026)
++                //
++                // SEASON WORK (batch 2+3): the "&& r.RaceDate.Year == 2026" check is
++                // gone. Callers pass only no-target races their season allows
++                // (ApplyNoTargetRule), so every no-target race reaching here scores 6.
++                // ❌ OLD: if (!r.HasTarget && r.RaceDate.Year == 2026)
++                if (!r.HasTarget)
+                 {
+                     points += 6;
+                     continue;
+--- a/RRCServices/League/LeagueSummaryService.cs
++++ b/RRCServices/League/LeagueSummaryService.cs
+@@ -3,6 +3,7 @@
+     using global::RRCServices.League.DTO;
+     using global::RRCServices.League.Trophy;
+     using global::RRCServices.RRCServices.League.Admin;
++    using global::RRCServices.Season;
+     using Microsoft.EntityFrameworkCore;
+     using RRCDataModel.Data;
+ 
+@@ -23,7 +24,8 @@
+         //   understand why each assignment decision was made.
+         //
+         //   Crucially, this service REUSES the same scoring infrastructure:
+-        //     - The same EF query (same filters, same 2026 no-target rule)
++        //     - The same EF query (same filters), and the same no-target rule via
++        //       LeagueTableService.ApplyNoTargetRule (SEASON WORK, batch 2+3)
+         //     - LeagueTableService.ScoreRunner (internal static method, same assembly)
+         //     - The same assignment rules, via the shared TrophyAssignmentResolver
+         //       (JR > 10k eligibility + best settled position, tie -> JR)
+@@ -45,6 +47,9 @@
+             private readonly IDbContextFactory<RRCContext> _factory;
+             private readonly ITrophyCalculator _calculator;
+ 
++            // SEASON WORK (batch 2+3): seasons decide which no-target races may score.
++            private readonly ISeasonService _seasons;
++
+             // The set of distance codes that qualify for the DB Trophy.
+             // Must stay in sync with LeagueTableService.DbDistanceCodes.
+             // Defined here separately (rather than made public on LeagueTableService)
+@@ -75,10 +80,12 @@
+ 
+             public RunnerLeagueSummaryService(
+                 IDbContextFactory<RRCContext> factory,
+-                ITrophyCalculator calculator)
++                ITrophyCalculator calculator,
++                ISeasonService seasons)
+             {
+                 _factory = factory;
+                 _calculator = calculator;
++                _seasons = seasons;
+             }
+ 
+ 
+@@ -100,7 +107,9 @@
+                 // LeagueTableService should be mirrored here.
+                 //
+                 // Scorable = active runner, active time entry, valid actual time,
+-                // and either a valid target time OR a 2026 race (no-target rule).
++                // and either a valid target time OR a no-target race in a season
++                // with AllowNoTarget on (no-target rule, applied after the query by
++                // LeagueTableService.ApplyNoTargetRule — SEASON WORK, batch 2+3).
+                 // -----------------------------------------------------------------
+                 List<LeagueRaceDto> races = await (
+                     from t in db.EventRunnerTimes.AsNoTracking()
+@@ -112,10 +121,9 @@
+                           && t.Date.Value >= seasonStart
+                           && t.Date.Value <= seasonEnd
+                           && t.Actual.HasValue && t.Actual.Value > 0
+-                          && (
+-                                (t.Target.HasValue && t.Target.Value > 0) ||
+-                                t.Date.Value.Year == 2026
+-                             )
++                          // ❌ OLD (SEASON WORK, batch 2+3 — now ApplyNoTargetRule below):
++                          // && ((t.Target.HasValue && t.Target.Value > 0) ||
++                          //     t.Date.Value.Year == 2026)
+                     select new LeagueRaceDto
+                     {
+                         RunnerId = r.EFKey,
+@@ -130,6 +138,11 @@
+                     }
+                 ).ToListAsync(ct);
+ 
++                // NO-TARGET RULE (SEASON WORK, batch 2+3): same filter as the public
++                // league tables, so the two screens can never disagree.
++                IReadOnlyList<SeasonInfo> seasons = await _seasons.ListAsync(ct);
++                races = LeagueTableService.ApplyNoTargetRule(races, seasons);
++
+                 // -----------------------------------------------------------------
+                 // STEP 2: Group races by runner.
+                 // -----------------------------------------------------------------
+--- a/RRCApp/Program.cs
++++ b/RRCApp/Program.cs
+@@ -1,6 +1,7 @@
+ using Microsoft.EntityFrameworkCore;
+ using RRCApp.Components;
+ using RRCApp.Season;
++using RRCConfig.Data;
+ using RRCDataModel.Data;
+ using RRCServices;
+ using RRCServices.Calculator;
+@@ -61,6 +62,17 @@
+ 
+             builder.Services.AddScoped<IClock, SystemClock>();
+ 
++            // SEASON WORK (batch 2): seasons live in config.Season in the same
++            // database, via their own small SeasonContext (RRCConfig project).
++            // RacePredictionService, RunnerCalculator and LeagueSummary use it.
++            builder.Services.AddDbContextFactory<SeasonContext>(options =>
++                options.UseSqlServer(cs, sql =>
++                    sql.EnableRetryOnFailure(
++                        maxRetryCount: 3,
++                        maxRetryDelay: TimeSpan.FromSeconds(10),
++                        errorNumbersToAdd: null)));
++            builder.Services.AddScoped<ISeasonService, SeasonService>();
++
+ 
+ 
+ 
+--- a/RRCApp/Components/Pages/RunnerCalculator.razor
++++ b/RRCApp/Components/Pages/RunnerCalculator.razor
+@@ -12,7 +12,7 @@
+ @inject IRunnerService RunnerService
+ @inject IRaceEventService RaceEventService
+ @inject IClock Clock
+-@inject ISeasonSettingsService SeasonSettingsService
++@inject ISeasonService SeasonService
+ 
+ <PageTitle>Race Calculator</PageTitle>
+ 
+--- a/RRCApp/Components/Pages/RunnerCalculator.razor.cs
++++ b/RRCApp/Components/Pages/RunnerCalculator.razor.cs
+@@ -358,6 +358,15 @@
+ //   All state fields, the SelectedRaceEventId property and its setter,
+ //   OnRaceSelectedIdChanged, LoadRaceEventsAroundToday, ApplySelectedRaceEvent,
+ //   ConfirmUpdate, navigation methods, and all formatting helpers are unchanged.
++//
++// SEASON WORK (batch 2, 15 Nov 2026):
++//   - ISeasonSettingsService (and the hard-coded 2025-12-01) replaced by
++//     ISeasonService. All seasons are loaded once in OnParametersSetAsync.
++//   - The season now depends on the SELECTED RACE's date, not on today:
++//     Calculate() picks the effective season for that date
++//     (SeasonRules.FindEffective). So the special November race is predicted
++//     from that year's races, and a January race uses only the new season's
++//     races. Predictions reset on 01 Jan.
+ // =============================================================================
+ 
+ using Microsoft.AspNetCore.Components;
+@@ -378,9 +387,9 @@
+ 
+         private RunnerDetailsDto? _runner;
+ 
+-        // Season start — loaded from ISeasonSettingsService in OnParametersSetAsync.
+-        // Required by SelectRacesForPredictionInput to enforce the in-season boundary.
+-        private DateTime _seasonStart;
++        // SEASON WORK (batch 2): all seasons, loaded once in OnParametersSetAsync.
++        // Calculate() picks the one that applies to the selected race's date.
++        private IReadOnlyList<SeasonInfo> _seasons = Array.Empty<SeasonInfo>();
+ 
+         // Race events around Clock.Now
+         private List<RaceEventListItemDTO> _raceEvents = new();
+@@ -456,13 +465,9 @@
+                 return;
+             }
+ 
+-            // CHANGE: load season start from ISeasonSettingsService so the
+-            // prediction input window matches the public app and the admin
+-            // SeasonDates settings. Previously there was no season boundary
+-            // in the admin calculator at all.
+-            var season = await SeasonSettingsService.GetAsync();
+-            // _seasonStart = season.SeasonStartDate.ToDateTime(TimeOnly.MinValue);
+-            _seasonStart = new DateTime(2025, 12, 1);
++            // SEASON WORK (batch 2): load all seasons once (a handful of rows).
++            // Replaces the hard-coded _seasonStart = 2025-12-01.
++            _seasons = await SeasonService.ListAsync();
+             _runner = await RunnerService.GetRunnerDetailsAsync(runnerId, includeInactiveTimes: false);
+ 
+             await LoadRaceEventsAroundToday();
+@@ -561,15 +566,27 @@
+             //   ✅ Positive actual time recorded
+             //   ✅ Known distance in metres
+             //   ✅ Mile races excluded from inputs
++            //
++            // SEASON WORK (batch 2): the season comes from the selected race's
++            // date (effective season), not from a hard-coded start date.
++            var season = SeasonRules.FindEffective(
++                _seasons, DateOnly.FromDateTime(_selectedRaceEvent.Date));
++
++            if (season is null)
++            {
++                _calcMessage = $"No season is set up that covers {_selectedRaceEvent.Date:dd MMM yyyy} — cannot predict.";
++                return;
++            }
++
+             var recent = CalculatorService.SelectRacesForPredictionInput(
+                 eventTimes: _runner.EventTimes,
+-                seasonStart: _seasonStart,
++                seasonStart: season.Window.FromInclusive,
+                 today: Clock.Now.Date,
+                 maxRaces: 3);
+ 
+             if (recent.Count == 0)
+             {
+-                _calcMessage = "No recent completed races (with actual times) found for this runner — cannot predict.";
++                _calcMessage = $"No completed races (with actual times) in season {season.Name} for this runner — cannot predict.";
+                 return;
+             }
+ 
+@@ -582,7 +599,7 @@
+             }
+ 
+             _predictedSeconds = (int)Math.Round(predicted.Value);
+-            _calcMessage = $"Prediction calculated using {recent.Count} recent race(s).";
++            _calcMessage = $"Prediction calculated using {recent.Count} recent race(s) from season {season.Name}.";
+         }
+ 
+         private async Task ConfirmUpdate()
+--- a/RRCApp/Components/Pages/LeagueSummary.razor
++++ b/RRCApp/Components/Pages/LeagueSummary.razor
+@@ -5,7 +5,9 @@
+ @using RRCServices.League.DTO
+ 
+ @using RRCServices.RRCServices.League.Admin
++@using RRCServices.Season
+ @inject IRunnerLeagueSummaryService SummaryService
++@inject ISeasonService SeasonService
+ 
+ <div class="d-flex justify-content-between align-items-center mb-3">
+     <h3 class="mb-0">League Summary</h3>
+@@ -154,9 +156,12 @@
+ }
+ 
+ @code {
+-    // Season window — defaults to current calendar year
++    // Season window — SEASON WORK (batch 2): defaults to the CURRENT season
++    // from ISeasonService (set in OnInitializedAsync). It used to default to the
++    // calendar year (1 Jan .. 31 Dec), which would have scored the special
++    // November race. The date pickers can still be changed by hand.
+     private DateTime _seasonStart = new DateTime(DateTime.Today.Year, 1, 1);
+-    private DateTime _seasonEnd = new DateTime(DateTime.Today.Year, 12, 31);
++    private DateTime _seasonEnd = new DateTime(DateTime.Today.Year, 10, 31);
+ 
+     // Filter / search
+     private string _search = "";
+@@ -179,6 +184,15 @@
+ 
+     protected override async Task OnInitializedAsync()
+     {
++        // SEASON WORK (batch 2): start on the current season. Between seasons
++        // (01 Nov .. 31 Dec) this is the season that has just ended.
++        var season = await SeasonService.GetCurrentAsync();
++        if (season is not null)
++        {
++            _seasonStart = season.Window.FromInclusive;
++            _seasonEnd = season.EndDate.ToDateTime(TimeOnly.MinValue);
++        }
++
+         await ReloadAsync();
+     }
+ 
+@@ -196,7 +210,12 @@
+ 
+         try
+         {
+-            _allRows = await SummaryService.GetSummaryAsync(_seasonStart, _seasonEnd);
++            // SEASON WORK (batch 2): the service filters with "Date <= seasonEnd",
++            // so pass the END of the last day (23:59:59) to include races held on
++            // it at any time. Not TimeOnly.MaxValue: SQL 'datetime' rounds
++            // .9999999 up to midnight of the next day.
++            var seasonEndOfDay = _seasonEnd.Date.AddDays(1).AddSeconds(-1);
++            _allRows = await SummaryService.GetSummaryAsync(_seasonStart, seasonEndOfDay);
+             ApplyFilter();
+         }
+         catch (Exception ex)
+--- a/PublicApp/Program.cs
++++ b/PublicApp/Program.cs
+@@ -1,5 +1,6 @@
+ using Microsoft.EntityFrameworkCore;
+ using PublicApp.Components;
++using RRCConfig.Data;
+ using RRCDataModel.Data;
+ using RRCServices;
+ using RRCServices.Calculator;
+@@ -63,6 +64,18 @@
+ 
+         builder.Services.AddSingleton<ISeasonSettingsService, SeasonSettingsService>();
+ 
++        // SEASON WORK (batch 2): seasons live in config.Season in the same
++        // database, via their own small SeasonContext (RRCConfig project).
++        // MyDetails and League use it. The JSON settings store above is no
++        // longer used by any page and is removed in a later batch.
++        builder.Services.AddDbContextFactory<SeasonContext>(options =>
++            options.UseSqlServer(cs, sql =>
++                sql.EnableRetryOnFailure(
++                    maxRetryCount: 5,
++                    maxRetryDelay: TimeSpan.FromSeconds(10),
++                    errorNumbersToAdd: null)));
++        builder.Services.AddScoped<ISeasonService, SeasonService>();
++
+         builder.Services.AddScoped<ILeagueTableService, LeagueTableService>();
+        // builder.Services.AddScoped<ILeagueDataService, LeagueDataService>();
+ 
+--- a/PublicApp/Components/Pages/MyDetails.razor
++++ b/PublicApp/Components/Pages/MyDetails.razor
+@@ -17,7 +17,7 @@
+ @* If you are using these in Calculate() *@
+ @inject CalculatorService CalculatorService
+ @inject IClock Clock
+-@inject ISeasonSettingsService SeasonSettingsService
++@inject ISeasonService SeasonService
+ 
+ <h4>My Time</h4>
+ 
+--- a/PublicApp/Components/Pages/MyDetails.razor.cs
++++ b/PublicApp/Components/Pages/MyDetails.razor.cs
+@@ -435,6 +435,15 @@
+ //   All state fields, computed properties, lifecycle methods, UI event
+ //   handlers, formatting helpers, TrophyRaces, SummaryText, PacePerMileText,
+ //   ConfirmUpdate, navigation methods — all unchanged.
++//
++// SEASON WORK (batch 2, 15 Nov 2026):
++//   - ISeasonSettingsService (and the hard-coded 2025-12-01) replaced by
++//     ISeasonService. All seasons are loaded once in OnParametersSetAsync.
++//   - _seasonStart and _hasSeasonRaces are now worked out for the SELECTED
++//     RACE's date (ApplySeasonForSelectedRace, called at the start of
++//     Calculate). So the special November race is predicted from that year's
++//     races, and a January race uses only the new season's races. With no
++//     race selected, today's date is used.
+ // =============================================================================
+ 
+ using XCalculator;
+@@ -467,6 +476,11 @@
+         private DateTime _seasonStart;       // DateTime for comparisons (season start boundary)
+         private bool _hasSeasonRaces;        // runner has >= 1 eligible race this season
+ 
++        // SEASON WORK (batch 2): all seasons (loaded once) and the one that
++        // applies to the selected race. Set by ApplySeasonForSelectedRace().
++        private IReadOnlyList<SeasonInfo> _seasons = Array.Empty<SeasonInfo>();
++        private SeasonInfo? _season;
++
+         private RunnerDetailsDto? _runner;
+         private List<RaceEventListItemDTO> _races = new();
+ 
+@@ -644,12 +658,10 @@
+                 return;
+             }
+ 
+-            // CHANGE: read season start from the settings service rather than
+-            // hardcoding new DateTime(2025, 12, 1). The admin SeasonDates page
+-            // manages this value — changes there are now reflected here immediately.
+-            var season = await SeasonSettingsService.GetAsync();
+-            // _seasonStart = season.SeasonStartDate.ToDateTime(TimeOnly.MinValue);
+-            _seasonStart = new DateTime(2025, 12, 1);
++            // SEASON WORK (batch 2): load all seasons once (a handful of rows).
++            // Replaces the hard-coded _seasonStart = 2025-12-01. The season used
++            // is chosen per selected race in ApplySeasonForSelectedRace().
++            _seasons = await SeasonService.ListAsync();
+ 
+             // Load runner details
+             _runner = await RunnerService.GetRunnerDetailsAsync(RunnerId, includeInactiveTimes: false);
+@@ -660,12 +672,9 @@
+                 return;
+             }
+ 
+-            // CHANGE: _hasSeasonRaces now delegates to SelectRacesForPredictionInput
+-            // so the guard uses exactly the same criteria as the prediction itself.
+-            // Previously this had its own inline check with its own IsOneMile call.
+-            _hasSeasonRaces = CalculatorService
+-                .SelectRacesForPredictionInput(_runner.EventTimes, _seasonStart, Clock.Now.Date)
+-                .Count > 0;
++            // SEASON WORK (batch 2): _hasSeasonRaces is now set in
++            // ApplySeasonForSelectedRace(), called from Calculate() below, because
++            // it depends on which race is selected.
+ 
+             // Load upcoming races (next 3 months)
+             var from = Clock.Now.Date;
+@@ -714,6 +723,29 @@
+         private static double GetRaceEventDistanceMeters(RaceEventListItemDTO re) => re.DistanceMeters;
+ 
+         /// <summary>
++        /// SEASON WORK (batch 2): works out the season for the selected race
++        /// (or today, if no race is selected) and sets _season, _seasonStart and
++        /// _hasSeasonRaces. Uses the effective season: inside a season, that
++        /// season; between seasons (the special November race), the season
++        /// that has just ended.
++        /// </summary>
++        private void ApplySeasonForSelectedRace()
++        {
++            var date = SelectedRaceEvent?.Date ?? Clock.Now.Date;
++
++            _season = SeasonRules.FindEffective(_seasons, DateOnly.FromDateTime(date));
++
++            // No season covers the date: MaxValue means no race qualifies.
++            _seasonStart = _season?.Window.FromInclusive ?? DateTime.MaxValue;
++
++            _hasSeasonRaces = _runner is not null
++                && _season is not null
++                && CalculatorService
++                    .SelectRacesForPredictionInput(_runner.EventTimes, _seasonStart, Clock.Now.Date)
++                    .Count > 0;
++        }
++
++        /// <summary>
+         /// Calculates predicted time (seconds) for the selected event using up to 3 recent eligible races.
+         ///
+         /// CHANGE: the inline LINQ block that built the 'recent' list has been replaced
+@@ -728,12 +760,21 @@
+             _calcMessage = null;
+             _saveMessage = null;
+ 
++            // SEASON WORK (batch 2): season depends on the selected race.
++            ApplySeasonForSelectedRace();
++
+             if (_runner is null || SelectedRaceEvent is null)
+             {
+                 _calcMessage = "Please select a runner and a race event.";
+                 return;
+             }
+ 
++            if (_season is null)
++            {
++                _calcMessage = "We can't provide a predicted time for this race — no season has been set up for it yet.";
++                return;
++            }
++
+             if (!_hasSeasonRaces)
+             {
+                 _calcMessage = $"We can't provide a predicted time yet — please run at least one race this season (from {_seasonStart:dd MMM yyyy}).";
+--- a/PublicApp/Components/Pages/League.razor
++++ b/PublicApp/Components/Pages/League.razor
+@@ -9,15 +9,21 @@
+ @* If you still have the nested namespace, use this instead: *@
+ @using RRCServices.League
+ @using RRCServices.League.DTO
++@using RRCServices.Season
+ 
+ 
+ @inject ILeagueTableService LeagueTableService
++@inject ISeasonService SeasonService
+ 
+ <PageTitle>League</PageTitle>
+ 
+ <div class="container py-3">
+     <h3 class="mb-3">Hypothetical New Rules League Tables</h3>
+     <p> Meet or beat = 10, otherwise 6. JR best of 8, DB best of 6, your position is the best possible</p>
++    @if (season is not null)
++    {
++        <p class="text-muted">Season @season.Name: @season.Window</p>
++    }
+     <div class="card mb-3">
+         <div class="card-body">
+             <div class="row g-3 align-items-end">
+--- a/PublicApp/Components/Pages/League.razor.cs
++++ b/PublicApp/Components/Pages/League.razor.cs
+@@ -1,24 +1,62 @@
+ using RRCServices.League.DTO;
++using RRCServices.Season;
+ 
+ namespace PublicApp.Components.Pages
+ {
+     public partial class League
+     {
+-        // private DateTime seasonStart = new(DateTime.Today.Year, 1, 1);
+-        // private DateTime seasonEnd = DateTime.Today;
+-
+-        private DateTime seasonStart = new DateTime(2026, 01, 01);
+-        private DateTime seasonEnd = new DateTime(2026, 11, 30);
++        // SEASON WORK (batch 2, 15 Nov 2026):
++        //   The hard-coded window (2026-01-01 .. 2026-11-30, and Reset -> 2025)
++        //   is replaced by the CURRENT season from ISeasonService:
++        //     - during a season: that season (01 Jan .. 31 Oct)
++        //     - 01 Nov .. 31 Dec: the season that has just ended
++        //   The league therefore stops at 31 Oct, so the special November race
++        //   is never scored.
++        //
++        // private DateTime seasonStart = new DateTime(2026, 01, 01);
++        // private DateTime seasonEnd = new DateTime(2026, 11, 30);
++
++        private SeasonInfo? season;
++
++        // Kept as DateTime so the (commented-out) date pickers in League.razor
++        // can still bind to them if they are switched back on.
++        private DateTime seasonStart;
++        private DateTime seasonEnd;   // last day (inclusive), at midnight
+ 
+         private TrophyLeaguePageDto? page;
+         private bool isLoading;
+         private string? error;
+ 
++        protected override async Task OnInitializedAsync()
++        {
++            await LoadCurrentSeasonAsync();
++        }
++
++        private async Task LoadCurrentSeasonAsync()
++        {
++            season = await SeasonService.GetCurrentAsync();
++
++            if (season is null)
++            {
++                error = "No season has been set up yet.";
++                return;
++            }
++
++            seasonStart = season.Window.FromInclusive;
++            seasonEnd = season.EndDate.ToDateTime(TimeOnly.MinValue);
++        }
++
+         private async Task LoadAsync()
+         {
+             error = null;
+             page = null;
+ 
++            if (season is null)
++            {
++                await LoadCurrentSeasonAsync();
++                if (season is null) return;
++            }
++
+             if (seasonEnd < seasonStart)
+             {
+                 error = "Season end must be on or after season start.";
+@@ -28,7 +66,11 @@
+             isLoading = true;
+             try
+             {
+-                page = await LeagueTableService.GetLeagueTablesAsync(seasonStart, seasonEnd);
++                // The service filters with "Date <= seasonEnd". Pass the END of
++                // the last day so races held on it at any time are included.
++                // (23:59:59, not TimeOnly.MaxValue: SQL 'datetime' would round
++                // .9999999 up to midnight of the NEXT day.)
++                page = await LeagueTableService.GetLeagueTablesAsync(seasonStart, EndOfDay(seasonEnd));
+             }
+             catch (Exception ex)
+             {
+@@ -42,12 +84,18 @@
+ 
+         private void Reset()
+         {
+-            seasonStart = new DateTime(2025, 01, 01);
+-            seasonEnd = new DateTime(2025, 11, 30);
++            // SEASON WORK (batch 2): back to the current season (was 2025).
++            if (season is not null)
++            {
++                seasonStart = season.Window.FromInclusive;
++                seasonEnd = season.EndDate.ToDateTime(TimeOnly.MinValue);
++            }
+             page = null;
+             error = null;
+         }
+ 
++        private static DateTime EndOfDay(DateTime day) => day.Date.AddDays(1).AddSeconds(-1);
++
+         private static string FormatTimeDiff(int seconds)
+         {
+             // You store timeDiff as seconds of improvement (capped per race).
+@@ -59,4 +107,4 @@
+             return $"{(int)ts.TotalMinutes}:{ts.Seconds:D2}";
+         }
+     }
+-}
+\ No newline at end of file
++}
+--- a/rrcapi/Program.cs
++++ b/rrcapi/Program.cs
+@@ -4,6 +4,7 @@
+ using Microsoft.AspNetCore.Builder;
+ using Microsoft.AspNetCore.Routing;
+ 
++using RRCConfig.Data;
+ using RRCDataModel.Data;
+ 
+ using RRCServices;
+@@ -11,6 +12,7 @@
+ using RRCServices.League;
+ using RRCServices.League.DTO;
+ using RRCServices.Runner;
++using RRCServices.Season;
+ 
+ var builder = WebApplication.CreateBuilder(args);
+ 
+@@ -98,8 +100,22 @@
+ builder.Services.AddScoped<IRaceEventService, RaceEventService>();
+ builder.Services.AddScoped<ILeagueTableService, LeagueTableService>();
+ 
++// FIX (batch 2+3): LeagueTableService needs ITrophyCalculator, which was never
++// registered here, so /api/v1/league/trophy could not be resolved (HTTP 500).
++builder.Services.AddScoped<ITrophyCalculator, TrophyCalculator>();
++
+ builder.Services.AddSingleton<IClock, SystemClock>();
+ 
++// SEASON WORK (batch 2+3): LeagueTableService now uses ISeasonService for the
++// no-target rule. Seasons live in config.Season (RRCConfig project).
++builder.Services.AddDbContextFactory<SeasonContext>(options =>
++    options.UseSqlServer(cs, sql =>
++        sql.EnableRetryOnFailure(
++            maxRetryCount: 3,
++            maxRetryDelay: TimeSpan.FromSeconds(10),
++            errorNumbersToAdd: null)));
++builder.Services.AddScoped<ISeasonService, SeasonService>();
++
+ var app = builder.Build();
+ 
+ app.UseHttpsRedirection();
+@@ -187,9 +203,12 @@
+         if (end < start)
+             return Results.BadRequest(new ApiErrorDto("`end` must be on or after `start`", "VALIDATION"));
+ 
++        // FIX (batch 2+3): 23:59:59 rather than TimeOnly.MaxValue. The column is SQL
++        // 'datetime', which rounds 23:59:59.9999999 up to midnight of the NEXT day,
++        // so races on the day after `end` could be counted.
+         var page = await league.GetLeagueTablesAsync(
+             start.ToDateTime(TimeOnly.MinValue),
+-            end.ToDateTime(TimeOnly.MaxValue),
++            end.ToDateTime(new TimeOnly(23, 59, 59)),
+             ct);
+ 
+         return Results.Ok(page);
+--- a/RRCServices/Season/SeasonRules.cs
++++ b/RRCServices/Season/SeasonRules.cs
+@@ -17,6 +17,11 @@
+ //   4. Predictions reset on 01 Jan: the new season has started, so only
+ //      its races count.
+ //   5. Seasons may not overlap, and names must be unique.
++//   6. NO-TARGET RULE (replaces the hard-coded "Year == 2026"): a league race
++//      with an actual time but no target scores a flat 6 points, if the race
++//      falls inside a season whose AllowNoTarget flag is on. Races between
++//      seasons never qualify. (2025 off, 2026 on, 2027 on, so the 01 Jan 2027
++//      race, which has no targets, scores 6 for everyone who runs it.)
+ // =============================================================================
+ public static class SeasonRules
+ {
+@@ -41,6 +46,14 @@
+                    .FirstOrDefault();
+     }
+ 
++    /// <summary>
++    /// Rule 6: true if a race on <paramref name="date"/> with no target time may
++    /// still score (flat 6 points), i.e. it falls inside a season whose
++    /// AllowNoTarget flag is on. False between seasons.
++    /// </summary>
++    public static bool AllowsNoTarget(IEnumerable<SeasonInfo> seasons, DateOnly date)
++        => FindContaining(seasons, date)?.AllowNoTarget ?? false;
++
+     /// <summary>Returns a list of problems; an empty list means the edit is valid.</summary>
+     public static IReadOnlyList<string> Validate(SeasonEdit edit, IEnumerable<SeasonInfo> existing)
+     {

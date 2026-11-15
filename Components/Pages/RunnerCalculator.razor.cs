@@ -358,6 +358,15 @@
 //   All state fields, the SelectedRaceEventId property and its setter,
 //   OnRaceSelectedIdChanged, LoadRaceEventsAroundToday, ApplySelectedRaceEvent,
 //   ConfirmUpdate, navigation methods, and all formatting helpers are unchanged.
+//
+// SEASON WORK (batch 2, 15 Nov 2026):
+//   - ISeasonSettingsService (and the hard-coded 2025-12-01) replaced by
+//     ISeasonService. All seasons are loaded once in OnParametersSetAsync.
+//   - The season now depends on the SELECTED RACE's date, not on today:
+//     Calculate() picks the effective season for that date
+//     (SeasonRules.FindEffective). So the special November race is predicted
+//     from that year's races, and a January race uses only the new season's
+//     races. Predictions reset on 01 Jan.
 // =============================================================================
 
 using Microsoft.AspNetCore.Components;
@@ -378,9 +387,9 @@ namespace RRCApp.Components.Pages
 
         private RunnerDetailsDto? _runner;
 
-        // Season start — loaded from ISeasonSettingsService in OnParametersSetAsync.
-        // Required by SelectRacesForPredictionInput to enforce the in-season boundary.
-        private DateTime _seasonStart;
+        // SEASON WORK (batch 2): all seasons, loaded once in OnParametersSetAsync.
+        // Calculate() picks the one that applies to the selected race's date.
+        private IReadOnlyList<SeasonInfo> _seasons = Array.Empty<SeasonInfo>();
 
         // Race events around Clock.Now
         private List<RaceEventListItemDTO> _raceEvents = new();
@@ -456,13 +465,9 @@ namespace RRCApp.Components.Pages
                 return;
             }
 
-            // CHANGE: load season start from ISeasonSettingsService so the
-            // prediction input window matches the public app and the admin
-            // SeasonDates settings. Previously there was no season boundary
-            // in the admin calculator at all.
-            var season = await SeasonSettingsService.GetAsync();
-            // _seasonStart = season.SeasonStartDate.ToDateTime(TimeOnly.MinValue);
-            _seasonStart = new DateTime(2025, 12, 1);
+            // SEASON WORK (batch 2): load all seasons once (a handful of rows).
+            // Replaces the hard-coded _seasonStart = 2025-12-01.
+            _seasons = await SeasonService.ListAsync();
             _runner = await RunnerService.GetRunnerDetailsAsync(runnerId, includeInactiveTimes: false);
 
             await LoadRaceEventsAroundToday();
@@ -561,15 +566,27 @@ namespace RRCApp.Components.Pages
             //   ✅ Positive actual time recorded
             //   ✅ Known distance in metres
             //   ✅ Mile races excluded from inputs
+            //
+            // SEASON WORK (batch 2): the season comes from the selected race's
+            // date (effective season), not from a hard-coded start date.
+            var season = SeasonRules.FindEffective(
+                _seasons, DateOnly.FromDateTime(_selectedRaceEvent.Date));
+
+            if (season is null)
+            {
+                _calcMessage = $"No season is set up that covers {_selectedRaceEvent.Date:dd MMM yyyy} — cannot predict.";
+                return;
+            }
+
             var recent = CalculatorService.SelectRacesForPredictionInput(
                 eventTimes: _runner.EventTimes,
-                seasonStart: _seasonStart,
+                seasonStart: season.Window.FromInclusive,
                 today: Clock.Now.Date,
                 maxRaces: 3);
 
             if (recent.Count == 0)
             {
-                _calcMessage = "No recent completed races (with actual times) found for this runner — cannot predict.";
+                _calcMessage = $"No completed races (with actual times) in season {season.Name} for this runner — cannot predict.";
                 return;
             }
 
@@ -582,7 +599,7 @@ namespace RRCApp.Components.Pages
             }
 
             _predictedSeconds = (int)Math.Round(predicted.Value);
-            _calcMessage = $"Prediction calculated using {recent.Count} recent race(s).";
+            _calcMessage = $"Prediction calculated using {recent.Count} recent race(s) from season {season.Name}.";
         }
 
         private async Task ConfirmUpdate()

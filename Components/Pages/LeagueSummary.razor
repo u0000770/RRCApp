@@ -5,7 +5,9 @@
 @using RRCServices.League.DTO
 
 @using RRCServices.RRCServices.League.Admin
+@using RRCServices.Season
 @inject IRunnerLeagueSummaryService SummaryService
+@inject ISeasonService SeasonService
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h3 class="mb-0">League Summary</h3>
@@ -154,9 +156,12 @@ else
 }
 
 @code {
-    // Season window — defaults to current calendar year
+    // Season window — SEASON WORK (batch 2): defaults to the CURRENT season
+    // from ISeasonService (set in OnInitializedAsync). It used to default to the
+    // calendar year (1 Jan .. 31 Dec), which would have scored the special
+    // November race. The date pickers can still be changed by hand.
     private DateTime _seasonStart = new DateTime(DateTime.Today.Year, 1, 1);
-    private DateTime _seasonEnd = new DateTime(DateTime.Today.Year, 12, 31);
+    private DateTime _seasonEnd = new DateTime(DateTime.Today.Year, 10, 31);
 
     // Filter / search
     private string _search = "";
@@ -179,6 +184,15 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // SEASON WORK (batch 2): start on the current season. Between seasons
+        // (01 Nov .. 31 Dec) this is the season that has just ended.
+        var season = await SeasonService.GetCurrentAsync();
+        if (season is not null)
+        {
+            _seasonStart = season.Window.FromInclusive;
+            _seasonEnd = season.EndDate.ToDateTime(TimeOnly.MinValue);
+        }
+
         await ReloadAsync();
     }
 
@@ -196,7 +210,12 @@ else
 
         try
         {
-            _allRows = await SummaryService.GetSummaryAsync(_seasonStart, _seasonEnd);
+            // SEASON WORK (batch 2): the service filters with "Date <= seasonEnd",
+            // so pass the END of the last day (23:59:59) to include races held on
+            // it at any time. Not TimeOnly.MaxValue: SQL 'datetime' rounds
+            // .9999999 up to midnight of the next day.
+            var seasonEndOfDay = _seasonEnd.Date.AddDays(1).AddSeconds(-1);
+            _allRows = await SummaryService.GetSummaryAsync(_seasonStart, seasonEndOfDay);
             ApplyFilter();
         }
         catch (Exception ex)
