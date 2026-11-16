@@ -42,8 +42,11 @@ namespace RRCApp.Components.Pages
             // Default: latest event first on initial load
             //_sortColumn = "Date";
             //_sortAscending = false;
+            // FIX: plain date order, newest first on opening (future races at the
+            // top, then the most recent past races). Was "closest to today first",
+            // which mixed past and future races together.
             _sortColumn = "Date";
-            _sortAscending = true;   // ✅ closest upcoming first
+            _sortAscending = false;
             await ReloadListAsync();
         }
 
@@ -88,26 +91,18 @@ namespace RRCApp.Components.Pages
         {
             if (_list is null) return;
 
-            var today = DateTime.Today;
-
             _list = (_sortColumn, _sortAscending) switch
             {
                 ("Title", true) => _list.OrderBy(x => x.EventTitle).ThenBy(x => x.Date).ToList(),
                 ("Title", false) => _list.OrderByDescending(x => x.EventTitle).ThenBy(x => x.Date).ToList(),
 
-                // ✅ Closest to today first (past + future mixed)
-                ("Date", true) => _list
-                    .OrderBy(x => Math.Abs((x.Date.Date - today).Days)) // distance from today
-                    .ThenByDescending(x => x.Date.Date)                 // tie-break: most recent first
-                    .ThenBy(x => x.EventTitle)
-                    .ToList(),
+                // FIX: plain chronological order (was "distance from today",
+                // which mixed past and future races).
+                // ▲ oldest -> newest
+                ("Date", true) => _list.OrderBy(x => x.Date).ThenBy(x => x.EventTitle).ToList(),
 
-                // Reverse: farthest from today first
-                ("Date", false) => _list
-                    .OrderByDescending(x => Math.Abs((x.Date.Date - today).Days))
-                    .ThenByDescending(x => x.Date.Date)
-                    .ThenBy(x => x.EventTitle)
-                    .ToList(),
+                // ▼ newest -> oldest
+                ("Date", false) => _list.OrderByDescending(x => x.Date).ThenBy(x => x.EventTitle).ToList(),
 
                 _ => _list
             };

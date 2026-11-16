@@ -5,7 +5,17 @@
 @inject IRaceEventService Service
 @inject NavigationManager Nav
 
-<h3>Race Events</h3>
+@* Page heading with "New race event" on the right. Moved here from the
+   Details panel: creating a race event doesn't depend on which race is selected. *@
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">Race Events</h3>
+
+    <button class="btn btn-success"
+            type="button"
+            @onclick="GoToCreateRaceEventPage">
+        New race event
+    </button>
+</div>
 
 @if (_list is null)
 {
@@ -62,7 +72,7 @@ else
                                 {
                                     <tr class="@(item.RaceEventId == _selectedId ? "table-active" : "")">
                                         <td>@item.EventTitle</td>
-                                        <td>@item.Date</td>
+                                        <td>@item.Date.ToString("dd/MM/yyyy")</td>
                                         <td class="text-end">
                                             <button class="btn btn-outline-primary btn-sm"
                                                     type="button"
@@ -118,7 +128,7 @@ else
                                 <dd class="col-sm-8">@_details.RaceEventId</dd>
 
                                 <dt class="col-sm-4">Date</dt>
-                                <dd class="col-sm-8">@_details.Date</dd>
+                                <dd class="col-sm-8">@_details.Date.ToString("dd/MM/yyyy")</dd>
 
                                 <dt class="col-sm-4">Active</dt>
                                 <dd class="col-sm-8">@(_details.Active ? "Yes" : "No")</dd>
@@ -158,11 +168,7 @@ else
                                     Edit date/title
                                 </button>
 
-                                <button class="btn btn-success"
-                                        type="button"
-                                        @onclick="GoToCreateRaceEventPage">
-                                    New race event
-                                </button>
+                                @* "New race event" moved to the page heading *@
 
                                 <!-- ✅ NEW -->
                                 <button class="btn btn-warning"
