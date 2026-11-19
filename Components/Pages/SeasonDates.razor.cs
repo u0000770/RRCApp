@@ -64,7 +64,8 @@ namespace RRCApp.Components.Pages
                 Name = year.ToString(),
                 StartDate = new DateOnly(year, 1, 1),
                 EndDate = new DateOnly(year, 10, 31),
-                AllowNoTarget = newest?.AllowNoTarget ?? true
+                AllowNoTarget = newest?.AllowNoTarget ?? true,
+                ApplyPredictionCap = newest?.ApplyPredictionCap ?? false   // 7% CAP: on/off per season
             };
 
             _errors = Array.Empty<string>();

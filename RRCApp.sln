@@ -25,6 +25,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "testCalc", "..\testCalc\tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RRCConfig", "..\RRCConfig\RRCConfig.csproj", "{9476B41F-D14E-A539-B52A-4B2A1E11A8CF}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PredictionReplay", "..\PredictionReplay\PredictionReplay.csproj", "{FE9007A2-49B4-E64C-4715-E8A47CFA9483}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -75,6 +77,10 @@ Global
 		{9476B41F-D14E-A539-B52A-4B2A1E11A8CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9476B41F-D14E-A539-B52A-4B2A1E11A8CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9476B41F-D14E-A539-B52A-4B2A1E11A8CF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FE9007A2-49B4-E64C-4715-E8A47CFA9483}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE9007A2-49B4-E64C-4715-E8A47CFA9483}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FE9007A2-49B4-E64C-4715-E8A47CFA9483}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FE9007A2-49B4-E64C-4715-E8A47CFA9483}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

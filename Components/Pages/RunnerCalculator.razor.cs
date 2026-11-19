@@ -590,7 +590,7 @@ namespace RRCApp.Components.Pages
                 return;
             }
 
-            var predicted = CalculatorService.PredictFromRecentRaces(recent, newDistanceMeters);
+            var predicted = CalculatorService.PredictFromRecentRacesForSeason(recent, newDistanceMeters, season.ApplyPredictionCap);   // 7% CAP: on/off per season
 
             if (predicted is null)
             {

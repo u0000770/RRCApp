@@ -40,13 +40,14 @@ else
                 <th>Start</th>
                 <th>End</th>
                 <th>No-target rule</th>
+                <th>7% prediction cap</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
             @if (_seasons.Count == 0)
             {
-                <tr><td colspan="5" class="text-muted">No seasons set up yet.</td></tr>
+                <tr><td colspan="6" class="text-muted">No seasons set up yet.</td></tr>
             }
             @foreach (var s in _seasons)
             {
@@ -62,6 +63,7 @@ else
                     <td>@s.StartDate.ToString("dd MMM yyyy")</td>
                     <td>@s.EndDate.ToString("dd MMM yyyy")</td>
                     <td>@(s.AllowNoTarget ? "On (no target = 6 points)" : "Off")</td>
+                    <td>@(s.ApplyPredictionCap ? "On" : "Off")</td>
                     <td class="text-end">
                         <button class="btn btn-sm btn-outline-primary"
                                 @onclick="() => StartEdit(s)"
@@ -112,6 +114,13 @@ else
                                 <InputCheckbox class="form-check-input" id="allowNoTarget" @bind-Value="_edit.AllowNoTarget" />
                                 <label class="form-check-label" for="allowNoTarget">
                                     No-target rule (no target = 6 points)
+                                </label>
+                            </div>
+                            <div class="form-check mb-2 ms-3">
+                                <InputCheckbox class="form-check-input" id="applyPredictionCap" @bind-Value="_edit.ApplyPredictionCap" />
+                                <label class="form-check-label" for="applyPredictionCap"
+                                       title="Predictions read a race more than 7% slower than its target as target + 7%">
+                                    7% prediction cap
                                 </label>
                             </div>
                         </div>
